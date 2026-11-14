@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Clickable Quest Links
+## Notes: Makes Questie's plain-text quest links in chat, like [[34] Raptor Mastery (194)], clickable without Questie.
+## Author: rambomst
+## Version: @project-version@
+## IconTexture: Interface\Icons\INV_Misc_Book_08
+## OptionalDeps: QuestieDB
+## SavedVariables: ClickableQuestLinksDB
+## X-Curse-Project-ID: 1803955
+
+ClickableQuestLinks.lua

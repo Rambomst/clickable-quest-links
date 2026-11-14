@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: QuestieDB (test fake)
+## Notes: Stand-in for QuestieDB's LibQuestieDB API with a few quests, for the Clickable Quest Links tests.
+
+QuestieDB.lua

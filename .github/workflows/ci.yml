@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # The cjber/skillup-forever commit whose forever_sim the tests last passed on. Bump it only after
+      # tests/run.sh passes against the newer one.
+      FOREVER_SIM_COMMIT: 431552d7aeda9fca853702a8a7a2f19008a6f5b6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out forever_sim
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cjber/skillup-forever
+          ref: ${{ env.FOREVER_SIM_COMMIT }}
+          path: .forever-sim
+          persist-credentials: false
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends luajit
+      # Blizzard's UI source and client tables are fetched at test time and never committed.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .forever-sim/tools/.cache/forever_sim
+          key: forever-sim-${{ env.FOREVER_SIM_COMMIT }}
+      - name: Fetch the simulator's data
+        working-directory: .forever-sim
+        run: python3 tools/forever_sim/fetch.py
+      - name: Run the tests
+        env:
+          FOREVER_SIM_REPO: ${{ github.workspace }}/.forever-sim
+        run: tests/run.sh
