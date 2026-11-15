@@ -693,8 +693,20 @@ local function runSelfTest(opts, questLog, known)
 	opts.selfTest, opts.saved, opts.level = true, {}, 36
 	local sim, G = boot(opts)
 	serveQuests(sim, known or {})
+	-- Any other quest is one the client has never loaded, as the probe looks for: it exists once asked for, and the
+	-- quest log only gives its verdict after that.
+	local loaded = {}
+	local request = sim.impl["C_QuestLog.RequestLoadQuestByID"]
+	sim.impl["C_QuestLog.RequestLoadQuestByID"] = function(questID)
+		loaded[questID] = not questLog[questID] or nil
+		return request(questID)
+	end
+	sim.impl["C_QuestLog.GetTitleForQuestID"] = function(questID)
+		return loaded[questID] and ("Quest " .. questID) or nil
+	end
 	sim.impl["C_PlayerInfo.GetContentDifficultyQuestForPlayer"] = function(questID)
-		return G.Enum.RelativeContentDifficulty[questLog[questID]]
+		local verdict = questLog[questID] or (loaded[questID] and "Easy" or "Trivial")
+		return G.Enum.RelativeContentDifficulty[verdict]
 	end
 	G.SlashCmdList.CQLSELFTEST("")
 	sim:advance(2.5)
@@ -719,6 +731,13 @@ scenario("the in-game self-test passes on the headless client with the real Ques
 	eq(run.total, 32, "checks run")
 	eq(run.player.effectiveLevel, 36, "recorded player level")
 	eq(run.colors["[[30] Sharptalon's Claw (2)]"].link, GREEN, "recorded link colour")
+	eq(run.probe.tried, 25, "quests probed")
+	assert(
+		run.probe.loaded > 0 and run.probe.same == 0,
+		"probe: " .. run.probe.loaded .. " loaded, " .. run.probe.same .. " same"
+	)
+	local quest = run.probe.quests[1]
+	eq(quest.before .. " then " .. quest.after, "Trivial then Easy", "first probed quest's verdicts")
 	sim:expectNoErrors(ADDON)
 end)
 
@@ -827,6 +846,31 @@ scenario("by default a converted link takes the quest's difficulty colour for th
 	for _, case in ipairs({ { 60, GREY }, { 40, GREEN }, { 34, YELLOW }, { 31, ORANGE }, { 29, RED } }) do
 		local sim = boot({ saved = {}, level = case[1] })
 		eq(filtered(sim, "[[34] Raptor Mastery (194)]"), raptorIn(case[2]), "player level " .. case[1])
+		sim:expectNoErrors(ADDON)
+	end
+end)
+
+scenario("a link takes the quest log's colour once the client has the quest, the level rule before", function()
+	local SHARPTALON = "[[30] Sharptalon's Claw (2)]"
+	for _, case in ipairs({ { true, GREEN }, { false, GREY } }) do
+		local loaded, color = case[1], case[2]
+		local sim, G = boot({ saved = {}, level = 36 })
+		-- Forever's client at level 36: the level rule's green band ends 5 below (UnitQuestTrivialLevelRange), while
+		-- its quest log called a level 30 quest Easy (in-game self-test, 2026-11-15).
+		rawset(G, "UnitQuestTrivialLevelRange", function()
+			return 5
+		end)
+		sim.impl["C_QuestLog.GetTitleForQuestID"] = function(questID)
+			return loaded and questID == 2 and "Sharptalon's Claw" or nil
+		end
+		sim.impl["C_PlayerInfo.GetContentDifficultyQuestForPlayer"] = function()
+			return G.Enum.RelativeContentDifficulty.Easy
+		end
+		eq(
+			filtered(sim, SHARPTALON),
+			"|c" .. color .. "|Hquest:2:30|h[Sharptalon's Claw]|h|r",
+			"loaded " .. tostring(loaded)
+		)
 		sim:expectNoErrors(ADDON)
 	end
 end)

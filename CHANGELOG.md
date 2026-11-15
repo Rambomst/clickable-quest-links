@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.1
+
+- Converted links take the colour your quest log gives the quest. Forever's quest log keeps a quest green a few levels
+  further down than the colouring links used, so some of them showed grey there. A quest your game hasn't loaded yet
+  is coloured by its level the first time it is linked.
+
 ## v1.1.0
 
 - Quest tooltips also read Ding!'s DingDB, Polestar's quest database and DonData, not only QuestieDB: whichever you

@@ -82,9 +82,9 @@ tested. Locally, with gh: `QUESTLINKS_DATABASES=latest tests/run.sh "the real "`
 `tests/ingame/ClickableQuestLinks_SelfTest` is a development-only addon (packages leave `tests/` out). Installed next
 to the addon, `/cqltest` sends the same quests through the client's own chat filters and quest tooltip, prints a
 summary and keeps the run in its saved variables. That covers what only the real client has: its zone names, its
-quest data, Blizzard's tooltip as it runs there, and the colour its quest log gives each quest. Forever's quest log
-asks the client (`C_PlayerInfo.GetContentDifficultyQuestForPlayer`) while links follow the level rules of
-`GetQuestDifficultyColor`, so each link's colour is checked against the quest log's. Two scenarios run it on the
+quest data, Blizzard's tooltip as it runs there, and the colour its quest log gives each quest, which only the client
+works out (`C_PlayerInfo.GetContentDifficultyQuestForPlayer`). Each link's colour is checked against it, and a probe of
+quests the client has never loaded records whether that answer needs the quest's data. Two scenarios run it on the
 headless client as well.
 
 The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat

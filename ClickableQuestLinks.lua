@@ -512,9 +512,16 @@ local function ClientTitle(questID)
 	end
 end
 
--- The quest's difficulty colour for this character, as the quest log shows it, or yellow.
-local function LinkColor(level)
-	local color = options.colorByDifficulty and level > 0 and GetQuestDifficultyColor(level)
+-- The quest's difficulty colour for this character, or yellow. Forever's quest log colours by
+-- C_PlayerInfo.GetContentDifficultyQuestForPlayer, which works from the client's data for the quest and keeps a quest
+-- green further down than GetQuestDifficultyColor's level rule does (level 30 at level 36: green, the rule says
+-- grey). A quest the client has not loaded yet only has the level rule.
+local function LinkColor(questID, level, loaded)
+	if not options.colorByDifficulty then
+		return YELLOW
+	end
+	local difficulty = loaded and C_PlayerInfo.GetContentDifficultyQuestForPlayer(questID)
+	local color = (difficulty and GetDifficultyColor(difficulty)) or (level > 0 and GetQuestDifficultyColor(level))
 	if not color then
 		return YELLOW
 	end
@@ -546,7 +553,7 @@ local function QuestLink(id, sentName, sentLevel)
 	local level = (info and info.level) or tonumber(sentLevel and sentLevel:match("^%-?%d+")) or -1
 	local name = title or (info and info.name) or sentName -- the client's title is in the player's language
 	linkNames[questID] = name
-	return QUEST_LINK:format(LinkColor(level), questID, level, name)
+	return QUEST_LINK:format(LinkColor(questID, level, title ~= nil), questID, level, name)
 end
 
 -- Rewrites the quest texts in a stretch of chat that holds no hyperlink. Links go to `links` and come back as

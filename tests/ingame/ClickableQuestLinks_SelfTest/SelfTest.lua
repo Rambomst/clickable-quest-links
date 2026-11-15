@@ -101,6 +101,54 @@ local function ColorCode(color)
 	)
 end
 
+local function ClientTitle(questID)
+	local title = C_QuestLog.GetTitleForQuestID(questID)
+	return type(title) == "string" and title ~= "" and title or nil
+end
+
+-- Whether the quest log's verdict needs the client's data for the quest decides whether links could use it before
+-- that data arrives. Only quests the client has never loaded tell, and it keeps quest data on disk
+-- (Cache/WDB/<locale>/questcache.wdb), so each run walks quest IDs from a random start (most IDs below 10000 are
+-- quests) for ones it has no title for, which loading them then uses up.
+local PROBE_SIZE = 25
+local PROBE_RANGE = 10000
+local PROBE_STRIDE = 97 -- shares no factor with PROBE_RANGE, so the walk can reach every ID
+
+local function StartProbe()
+	local probe = {}
+	local id = math.random(1, PROBE_RANGE)
+	for _ = 1, PROBE_RANGE do
+		if #probe == PROBE_SIZE then
+			break
+		end
+		id = (id + PROBE_STRIDE - 1) % PROBE_RANGE + 1
+		if not ClientTitle(id) then
+			probe[#probe + 1] = { id = id, before = QuestLogDifficulty(id) }
+			C_QuestLog.RequestLoadQuestByID(id)
+		end
+	end
+	return probe
+end
+
+-- The probed IDs that turned out to be quests, with the verdict before and after their data loaded.
+local function FinishProbe(probe)
+	local result = { tried = #probe, loaded = 0, same = 0, quests = {} }
+	for _, quest in ipairs(probe) do
+		if ClientTitle(quest.id) then
+			local after = QuestLogDifficulty(quest.id)
+			result.loaded = result.loaded + 1
+			result.same = result.same + (after == quest.before and 1 or 0)
+			result.quests[#result.quests + 1] = {
+				id = quest.id,
+				level = C_QuestLog.GetQuestDifficultyLevel(quest.id),
+				before = DifficultyName(quest.before),
+				after = DifficultyName(after),
+			}
+		end
+	end
+	return result
+end
+
 -- A SAY line, as the chat frame would filter it: CHAT_MSG_SAY because whisper addons such as WIM act on whispers.
 local function Convert(message, lineID)
 	local discard, text = ChatFrameUtil.ProcessMessageEventFilters(
@@ -181,6 +229,14 @@ local function Report(run)
 	if run.colorSkipped then
 		print("  Colours not checked: " .. run.colorSkipped .. ".")
 	end
+	if run.probe then
+		print(
+			("  Quest log verdict on %d quests the client had never loaded: the same before their data for %d."):format(
+				run.probe.loaded,
+				run.probe.same
+			)
+		)
+	end
 	for _, check in ipairs(run.checks) do
 		if not check.ok then
 			print(("  |cffff4040FAIL|r %s: got %s"):format(check.name, tostring(check.detail)))
@@ -256,8 +312,6 @@ local function Run()
 		run.links[case.message] = text
 		case.text = text
 		case.questID = type(text) == "string" and tonumber(text:match("|Hquest:(%d+):")) or nil
-		-- Asked again once the quest data is in: a different answer means the client needs that data for it.
-		case.difficultyBefore = QuestLogDifficulty(case.questID)
 		if not case.link then
 			check(case.message .. " stays text", text == case.message, text)
 		elseif exact or not case.plain then
@@ -266,8 +320,11 @@ local function Run()
 		end
 	end
 
+	local probe = StartProbe()
+
 	C_Timer.After(DATA_WAIT, function()
 		local ok, err = pcall(function()
+			run.probe = FinishProbe(probe)
 			for _, case in ipairs(CASES) do
 				if case.link and type(case.text) == "string" and case.text:find("|Hquest:", 1, true) then
 					local shown, lines = OpenTooltip(case.text)
@@ -288,7 +345,6 @@ local function Run()
 							link = linkColor,
 							questLog = questLog,
 							difficulty = DifficultyName(difficulty),
-							before = case.difficultyBefore ~= nil and DifficultyName(case.difficultyBefore) or nil,
 						}
 						check(
 							case.message .. ": colour matches the quest log",
