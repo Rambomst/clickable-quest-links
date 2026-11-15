@@ -418,12 +418,34 @@ local function SetDatabaseAddOns(character, enabled)
 	C_AddOns.SaveAddOns()
 end
 
-local function Reload(message)
-	Say(message .. " Reloading; if nothing happens, /reload.")
-	C_Timer.After(1, ReloadUI)
+-- The client reloads the UI for an addon only from a key press or a click, not from a timer (2026-11-15: every round
+-- waited for a typed /reload). So the slash commands reload at once, and a round, which ends on a timer, offers a
+-- button.
+local function Reload(message, now)
+	if now then
+		Say(message)
+		ReloadUI()
+		return
+	end
+	Say(message .. " Click Reload UI, or type /reload.")
+	if StaticPopupDialogs and StaticPopup_Show then
+		StaticPopupDialogs.CQL_SELFTEST_RELOAD = StaticPopupDialogs.CQL_SELFTEST_RELOAD
+			or {
+				text = "Clickable Quest Links self-test:\n%s",
+				button1 = RELOADUI or "Reload UI",
+				button2 = CANCEL or "Cancel",
+				OnAccept = function()
+					ReloadUI()
+				end,
+				timeout = 0,
+				whileDead = 1,
+				hideOnEscape = 1,
+			}
+		StaticPopup_Show("CQL_SELFTEST_RELOAD", message)
+	end
 end
 
-local function StartRounds(queue)
+local function StartRounds(queue, now)
 	if not queue[1] then
 		Say("no quest database is installed.")
 		return
@@ -437,7 +459,7 @@ local function StartRounds(queue)
 	ClickableQuestLinks_SelfTestDB = ClickableQuestLinks_SelfTestDB or {}
 	ClickableQuestLinks_SelfTestDB.rounds = rounds
 	SetDatabaseAddOns(rounds.character, ROUND_ADDONS[queue[1]] or {})
-	Reload(("%d rounds, first %s alone."):format(#queue, queue[1]))
+	Reload(("%d rounds, first %s alone."):format(#queue, queue[1]), now)
 end
 
 local function ContinueRounds(rounds)
@@ -491,7 +513,7 @@ SlashCmdList.CQLSELFTEST = function(message)
 				queue[#queue + 1] = database
 			end
 		end
-		StartRounds(queue)
+		StartRounds(queue, true)
 	elseif message == "stop" then
 		local rounds = ClickableQuestLinks_SelfTestDB and ClickableQuestLinks_SelfTestDB.rounds
 		if type(rounds) == "table" and rounds.restore then
@@ -500,7 +522,7 @@ SlashCmdList.CQLSELFTEST = function(message)
 		if ClickableQuestLinks_SelfTestDB then
 			ClickableQuestLinks_SelfTestDB.rounds = nil
 		end
-		Reload("rounds stopped, the AddOns list is back as it was.")
+		Reload("rounds stopped, the AddOns list is back as it was.", true)
 	else
 		Run()
 	end

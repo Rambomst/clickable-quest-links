@@ -779,7 +779,7 @@ scenario("the in-game self-test's rounds run each installed database alone, then
 	local GUID = "Player-91-0ABCDEF0"
 	local states = { QuestieDB = true, Ding = true, DonData = true }
 	local unsaved = {}
-	local reloads = 0
+	local reloads, pressed, shown = 0, false, nil
 	local function client(sim)
 		sim.impl.UnitGUID = function(unit)
 			return unit == "player" and GUID or nil
@@ -804,10 +804,23 @@ scenario("the in-game self-test's rounds run each installed database alone, then
 			end
 			unsaved = {}
 		end
+		-- The client reloads for an addon only during a key press or click.
 		sim.impl["C_UI.Reload"] = function()
-			reloads = reloads + 1
-			unsaved = {}
+			if pressed then
+				reloads = reloads + 1
+				unsaved = {}
+			end
 		end
+		-- Blizzard's StaticPopup is not loaded here: a stand-in that keeps the dialog shown.
+		rawset(sim.G, "StaticPopupDialogs", {})
+		rawset(sim.G, "StaticPopup_Show", function(name, text)
+			shown = { name = name, text = text }
+		end)
+	end
+	local function press(fn)
+		pressed = true
+		fn()
+		pressed = false
 	end
 	local function enabled()
 		local names = {}
@@ -822,8 +835,10 @@ scenario("the in-game self-test's rounds run each installed database alone, then
 
 	local sim, G = boot({ ding = true, donData = true, selfTest = true, saved = {} })
 	client(sim)
-	G.SlashCmdList.CQLSELFTEST("rounds")
-	sim:advance(1)
+	-- Typed, so the key press lets it reload at once.
+	press(function()
+		G.SlashCmdList.CQLSELFTEST("rounds")
+	end)
 	eq(enabled(), "QuestieDB", "the first round's database")
 	eq(reloads, 1, "reloads")
 	local saved = G.ClickableQuestLinks_SelfTestDB
@@ -837,7 +852,12 @@ scenario("the in-game self-test's rounds run each installed database alone, then
 		opts.selfTest, opts.saved = true, { ClickableQuestLinks_SelfTestDB = saved }
 		sim, G = boot(opts)
 		client(sim)
+		shown = nil
 		sim:advance(20)
+		-- A round ends on a timer, where the client would not reload: it waits for the dialog's button.
+		eq(reloads, i, "reloads before the click in round " .. i)
+		assert(shown and shown.name == "CQL_SELFTEST_RELOAD", "no reload dialog after round " .. i)
+		press(G.StaticPopupDialogs[shown.name].OnAccept)
 		saved = G.ClickableQuestLinks_SelfTestDB
 		eq(saved.runs[1].round, database, "round " .. i)
 		eq(saved.runs[1].answering, database, "answering in round " .. i)
