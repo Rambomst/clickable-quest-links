@@ -1,6 +1,7 @@
 -- Scenario tests for Clickable Quest Links on SkillUp Forever's headless Forever client (forever_sim): Blizzard's
 -- real chat filter registry (ChatFrameUtil), SetItemRef and ItemRefTooltip, with a fake QuestieDB
--- (fixtures/QuestieDB). Run with tests/run.sh, which sets FOREVER_SIM and QUESTLINKS_SIM_CACHE.
+-- (fixtures/QuestieDB) and, for the "real QuestieDB" scenarios, the released one. Run with tests/run.sh, which sets
+-- FOREVER_SIM, QUESTLINKS_SIM_CACHE and REAL_QUESTIEDB.
 local here = debug.getinfo(1, "S").source:match("^@(.*[/\\])") or "./"
 local SIM = assert(os.getenv("FOREVER_SIM"), "FOREVER_SIM is not set: run tests/run.sh")
 local CACHE = assert(os.getenv("QUESTLINKS_SIM_CACHE"), "QUESTLINKS_SIM_CACHE is not set: run tests/run.sh")
@@ -20,7 +21,21 @@ local MAP_NAMES = {
 	[1454] = "Orgrimmar",
 }
 
+-- The released QuestieDB, which keeps its data in TOC metadata that C_EncodingUtil decodes.
+local REAL_QUESTIEDB = assert(os.getenv("REAL_QUESTIEDB"), "REAL_QUESTIEDB is not set: run tests/run.sh")
+-- The sim has no AreaTable, the client's source of zone names; these are the pinned Forever build's names for the
+-- area IDs the real QuestieDB gives the quests below.
+local AREA_NAMES = {
+	[10] = "Duskwood",
+	[17] = "The Barrens",
+	[33] = "Stranglethorn Vale",
+	[40] = "Westfall",
+	[331] = "Ashenvale",
+	[1637] = "Orgrimmar",
+}
+
 local Sim = dofile(SIM .. "sim.lua")
+local EncodingUtil = dofile(here .. "encodingutil.lua")
 
 local RAPTOR = "|cffffff00|Hquest:194:34|h[Raptor Mastery]|h|r"
 
@@ -29,10 +44,12 @@ local RAPTOR = "|cffffff00|Hquest:194:34|h[Raptor Mastery]|h|r"
 -- opts.addon (default true; false boots Blizzard's behaviour alone, for comparison), opts.locale (the client language
 -- the addon loads under), opts.saved (saved variables; by default difficulty colours are off, so converted links are
 -- plain yellow), opts.level (the player's level; the sim's is 60), opts.ding, opts.polestar and opts.donData (load
--- that database's stand-in), opts.polestarUnloaded (Polestar's reads fail, as before its data loads).
+-- that database's stand-in), opts.polestarUnloaded (Polestar's reads fail, as before its data loads),
+-- opts.realQuestieDB (the released QuestieDB instead of the fake one).
 local function boot(opts)
 	opts = opts or {}
 	local sim = Sim.new({ cache = CACHE })
+	EncodingUtil.install(sim)
 	-- Sim gap: its SetOwner drops a tooltip's points even for ANCHOR_PRESERVE, which in the client keeps them (and
 	-- Blizzard's ItemRefSetHyperlink then does arithmetic on the unplaced title's GetRight).
 	local tooltipMethods = sim.widgets.methods.GameTooltip
@@ -50,7 +67,12 @@ local function boot(opts)
 	if opts.contract then
 		sim.G.FAKE_QUESTIEDB_CONTRACT = opts.contract
 	end
-	if opts.questieDB ~= false then
+	if opts.realQuestieDB then
+		sim:addon(REAL_QUESTIEDB)
+		sim.impl["C_Map.GetAreaInfo"] = function(areaID)
+			return AREA_NAMES[areaID]
+		end
+	elseif opts.questieDB ~= false then
 		sim:addon(FAKE_DB_DIR)
 	end
 	for option, dir in pairs(FAKE_SOURCES) do
@@ -461,6 +483,76 @@ scenario("DonData names a starter and a finisher, with the link's level", functi
 	assert(hasLine(lines, "Ends:|r Distant Elder"), "end line:\n" .. table.concat(lines, "\n"))
 	assert(not hasLine(lines, "Distant Elder ("), "a guessed turn-in map")
 	assert(not hasLine(lines, "Level:"), "a level with none on the link or in DonData")
+	sim:expectNoErrors(ADDON)
+end)
+
+local function expectLines(lines, wanted)
+	for _, text in ipairs(wanted) do
+		assert(hasLine(lines, text), text .. " missing:\n" .. table.concat(lines, "\n"))
+	end
+end
+
+-- The expected names, levels and zone IDs below were read from QuestieDB 1.1.1's data directly (LibQuestieDB.Quest,
+-- Npc, Object and Item), not through the addon.
+scenario("the real QuestieDB: Raptor Mastery's level, starter and finisher with their zones", function()
+	local sim, G = boot({ realQuestieDB = true })
+	serveQuests(sim, { [194] = { title = "Raptor Mastery", text = "Kill 10 Stranglethorn Raptors." } })
+	click(G, filtered(sim, "[[34] Raptor Mastery (194)]"))
+	local lines = tooltipLines(G)
+	eq(lines[1], "Raptor Mastery", "title")
+	expectLines(lines, {
+		"Level:|r 34 (requires 28)",
+		"Starts:|r Hemet Nesingwary (Stranglethorn Vale)",
+		"Ends:|r Hemet Nesingwary (Stranglethorn Vale)",
+	})
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("the real QuestieDB: a plain link converts by its name, at its level", function()
+	local sim, G = boot({ realQuestieDB = true })
+	serveQuests(sim, {})
+	local link = filtered(sim, "[The Spirits of Stonetalon (1061)]")
+	eq(link, "|cffffff00|Hquest:1061:17|h[The Spirits of Stonetalon]|h|r", "converted link")
+	eq(filtered(sim, "[Nope (1061)]"), "[Nope (1061)]", "another name")
+	eq(filtered(sim, "[Made Up (999999)]"), "[Made Up (999999)]", "a quest the database lacks")
+	click(G, link)
+	local lines = tooltipLines(G)
+	eq(lines[1], "The Spirits of Stonetalon", "title")
+	expectLines(lines, {
+		"Level:|r 17 (requires 13)",
+		"Starts:|r Zor Lonetree (Orgrimmar)",
+		"Ends:|r Seereth Stonebreak (The Barrens)",
+	})
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("the real QuestieDB: quests started by an item and by an object", function()
+	local sim, G = boot({ realQuestieDB = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[30] Sharptalon's Claw (2)]"))
+	expectLines(tooltipLines(G), {
+		"Level:|r 30 (requires 20)",
+		"Starts:|r Sharptalon's Claw (item)",
+		"Ends:|r Senani Thunderheart (Ashenvale)",
+	})
+	click(G, filtered(sim, "[[28] The Legend of Stalvan (68)]"))
+	expectLines(tooltipLines(G), {
+		"Level:|r 28 (requires 22)",
+		"Starts:|r Old Footlocker (Westfall)",
+		"Ends:|r Clerk Daltry (Duskwood)",
+	})
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("the real QuestieDB: six starters end in a count", function()
+	local sim, G = boot({ realQuestieDB = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[10] Report to Gryan Stoutmantle (109)]"))
+	expectLines(tooltipLines(G), {
+		"Level:|r 10 (requires 9)",
+		"Starts:|r Farmer Saldean (Westfall), Farmer Furlbrow (Westfall) and 4 more",
+		"Ends:|r Gryan Stoutmantle (Westfall)",
+	})
 	sim:expectNoErrors(ADDON)
 end)
 

@@ -41,6 +41,12 @@ jobs:
       - name: Fetch the simulator's data
         working-directory: .forever-sim
         run: python3 tools/forever_sim/fetch.py
+      # The released quest databases the scenarios read. tests/run.sh fetches any that are missing and checks their
+      # SHA-256, and pins them, so its hash keys the cache.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/questlinks-sim/addons
+          key: questlinks-addons-${{ hashFiles('tests/run.sh') }}
       - name: Run the tests
         env:
           FOREVER_SIM_REPO: ${{ github.workspace }}/.forever-sim

@@ -57,7 +57,7 @@ from native speakers are welcome as an issue or a pull request.
 
 The tests run the addon on forever_sim, the headless Forever client in
 [SkillUp Forever's repository](https://github.com/cjber/skillup-forever), against Blizzard's real chat and tooltip
-code. They need LuaJIT, Python 3 and a SkillUp Forever clone next to this repository:
+code. They need LuaJIT, Python 3, curl and a SkillUp Forever clone next to this repository:
 
 ```bash
 git clone https://github.com/cjber/skillup-forever ../skillup-forever
@@ -67,6 +67,12 @@ tests/run.sh
 
 `FOREVER_SIM_REPO` points the tests at a clone somewhere else. CI runs them on every push, pinned to the commit in
 `.github/workflows/ci.yml`.
+
+Most scenarios use small stand-ins for the quest databases; the "real QuestieDB" ones read the released QuestieDB.
+`tests/run.sh` downloads the pinned release into the sim's cache on the first run and checks it against its SHA-256;
+`REAL_QUESTIEDB` points those scenarios at another copy. QuestieDB keeps its data base64, zlib and CBOR encoded in TOC
+metadata and decodes it with `C_EncodingUtil`, which forever_sim generates from Blizzard's documentation without
+implementing, so `tests/encodingutil.lua` implements it for the sim (`tests/encodingutil_test.lua` checks it).
 
 The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat
 filter on forever_sim, and `tools/screenshots.py` draws the result with
