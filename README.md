@@ -41,7 +41,7 @@ list that knows the quest is used:
 | [QuestieDB](https://www.curseforge.com/wow/addons/questiedb) | level, required level, who starts and ends the quest, with their zone |
 | [Ding!](https://www.curseforge.com/wow/addons/ding-xp-and-leveling-guide) (its DingDB) | the same, and English quest names, so `[Name (id)]` from an English client converts on any client |
 | [Polestar Guides](https://www.curseforge.com/wow/addons/polestar) | the same, while one of Polestar's quest features is on (its quest data loads only then) |
-| [DonData](https://www.curseforge.com/wow/addons/dondata) (with Questdon or Leveldon) | the required level, and a starter and a finisher once the game or DonData's records know their names; the level comes from the link |
+| [DonData](https://www.curseforge.com/wow/addons/dondata) (with Questdon or Leveldon) | the required level, and a starter and a finisher once the game or DonData's records know their names; the level comes from the link or the game |
 
 With none of them, links still convert and open Blizzard's own quest tooltip.
 
@@ -84,8 +84,9 @@ to the addon, `/cqltest` sends the same quests through the client's own chat fil
 summary and keeps the run in its saved variables. That covers what only the real client has: its zone names, its
 quest data, Blizzard's tooltip as it runs there, and the colour its quest log gives each quest, which only the client
 works out (`C_PlayerInfo.GetContentDifficultyQuestForPlayer`). Each link's colour is checked against it, and a probe of
-quests the client has never loaded records whether that answer needs the quest's data. Two scenarios run it on the
-headless client as well.
+quests the client has never loaded records whether that answer needs the quest's data. Scenarios run it on the
+headless client as well, with the real QuestieDB and with each of the other real databases alone, as the in-game
+rounds do with one database enabled.
 
 The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat
 filter on forever_sim, and `tools/screenshots.py` draws the result with

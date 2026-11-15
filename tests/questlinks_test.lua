@@ -687,9 +687,19 @@ local GREY, GREEN, YELLOW, ORANGE, RED = "ff808080", "ff40bf40", "ffffd100", "ff
 -- GetQuestDifficultyColor with boot()'s trivial range of 8. The real client works this out itself.
 local QUEST_LOG_AT_36 = { [194] = "Fair", [1061] = "Trivial", [2] = "Easy", [68] = "Easy", [109] = "Trivial" }
 
--- Boots with the self-test, runs /cqltest with questLog standing in for the client's quest log colours and known for
--- the quest data the server sends, and returns the run and its failed checks, one per line.
-local function runSelfTest(opts, questLog, known)
+-- The self-test's quests as the real client has them: in its quest cache, with their titles and levels.
+local CLIENT_QUESTS = {
+	[194] = { "Raptor Mastery", 34 },
+	[1061] = { "The Spirits of Stonetalon", 17 },
+	[2] = { "Sharptalon's Claw", 30 },
+	[68] = { "The Legend of Stalvan", 28 },
+	[109] = { "Report to Gryan Stoutmantle", 10 },
+}
+
+-- Boots with the self-test, runs /cqltest with questLog standing in for the client's quest log colours, known for the
+-- tooltip data the server sends and client for the quests the client already has (CLIENT_QUESTS' shape), and returns
+-- the run and its failed checks, one per line.
+local function runSelfTest(opts, questLog, known, client)
 	opts.selfTest, opts.saved, opts.level = true, {}, 36
 	local sim, G = boot(opts)
 	serveQuests(sim, known or {})
@@ -702,7 +712,12 @@ local function runSelfTest(opts, questLog, known)
 		return request(questID)
 	end
 	sim.impl["C_QuestLog.GetTitleForQuestID"] = function(questID)
-		return loaded[questID] and ("Quest " .. questID) or nil
+		local quest = client and client[questID]
+		return quest and quest[1] or (loaded[questID] and ("Quest " .. questID)) or nil
+	end
+	sim.impl["C_QuestLog.GetQuestDifficultyLevel"] = function(questID)
+		local quest = client and client[questID]
+		return quest and quest[2] or (loaded[questID] and 50) or 0
 	end
 	sim.impl["C_PlayerInfo.GetContentDifficultyQuestForPlayer"] = function(questID)
 		local verdict = questLog[questID] or (loaded[questID] and "Easy" or "Trivial")
@@ -723,7 +738,7 @@ local function runSelfTest(opts, questLog, known)
 end
 
 scenario("the in-game self-test passes on the headless client with the real QuestieDB", function()
-	local sim, run, failed = runSelfTest({ realQuestieDB = true }, QUEST_LOG_AT_36)
+	local sim, run, failed = runSelfTest({ realQuestieDB = true }, QUEST_LOG_AT_36, nil, CLIENT_QUESTS)
 	eq(failed, "", "failed checks")
 	eq(run.skipped, nil, "lines left unchecked")
 	eq(run.colorSkipped, nil, "colours left unchecked")
@@ -740,6 +755,23 @@ scenario("the in-game self-test passes on the headless client with the real Ques
 	eq(quest.before .. " then " .. quest.after, "Trivial then Easy", "first probed quest's verdicts")
 	sim:expectNoErrors(ADDON)
 end)
+
+-- What the in-game rounds with one database enabled will see, as far as the headless client can tell: Ding! and
+-- Polestar give QuestieDB's lines, DonData the Level lines (with no NPC names learned or cached here).
+for _, database in ipairs({
+	{ "Ding!", "Ding", { questieDB = false, realDing = true }, 32 },
+	{ "Polestar", "Polestar", { questieDB = false, realPolestar = true }, 32 },
+	{ "DonData", "DonData", { questieDB = false, realDonData = true }, 22 },
+}) do
+	local title, name, opts, checks = database[1], database[2], database[3], database[4]
+	scenario("the in-game self-test passes with the real " .. title .. " alone", function()
+		local sim, run, failed = runSelfTest(opts, QUEST_LOG_AT_36, nil, CLIENT_QUESTS)
+		eq(failed, "", "failed checks")
+		eq(run.answering, name, "answering database")
+		eq(run.total, checks, "checks run")
+		sim:expectNoErrors(ADDON)
+	end)
+end
 
 scenario("the in-game self-test fails a link coloured unlike the quest log", function()
 	-- No database: the four quests with a level in the text still convert, and their tooltips show the server's data.
@@ -873,6 +905,26 @@ scenario("a link takes the quest log's colour once the client has the quest, the
 		)
 		sim:expectNoErrors(ADDON)
 	end
+end)
+
+scenario("a link with no level takes the client's once it has the quest, which DonData needs", function()
+	local sim, G = boot({ questieDB = false, realDonData = true })
+	serveQuests(sim, {})
+	local loaded = false
+	sim.impl["C_QuestLog.GetTitleForQuestID"] = function(questID)
+		return loaded and questID == 194 and "Raptor Mastery" or nil
+	end
+	sim.impl["C_QuestLog.GetQuestDifficultyLevel"] = function(questID)
+		return loaded and questID == 194 and 34 or 0
+	end
+	local early = filtered(sim, "[Raptor Mastery (194)]")
+	eq(early, "|cffffff00|Hquest:194:-1|h[Raptor Mastery]|h|r", "before the client has the quest")
+	loaded = true
+	eq(filtered(sim, "[Raptor Mastery (194)]"), RAPTOR, "once it has")
+	-- The early link's tooltip, opened once the quest has loaded.
+	click(G, early)
+	expectLines(tooltipLines(G), { "Level:|r 34 (requires 28)" })
+	sim:expectNoErrors(ADDON)
 end)
 
 scenario("a quest with no known level stays yellow with colours on", function()

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.2
+
+- A link whose text has no level, like `[Raptor Mastery (194)]`, takes the quest's level from the game once the game
+  has loaded the quest. With DonData, which has no quest levels, its tooltip then shows the level and the level it
+  requires.
+
 ## v1.1.1
 
 - Converted links take the colour your quest log gives the quest. Forever's quest log keeps a quest green a few levels

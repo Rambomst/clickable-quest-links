@@ -123,7 +123,8 @@ local function StartProbe()
 		end
 		id = (id + PROBE_STRIDE - 1) % PROBE_RANGE + 1
 		if not ClientTitle(id) then
-			probe[#probe + 1] = { id = id, before = QuestLogDifficulty(id) }
+			probe[#probe + 1] =
+				{ id = id, before = QuestLogDifficulty(id), levelBefore = C_QuestLog.GetQuestDifficultyLevel(id) }
 			C_QuestLog.RequestLoadQuestByID(id)
 		end
 	end
@@ -141,6 +142,7 @@ local function FinishProbe(probe)
 			result.quests[#result.quests + 1] = {
 				id = quest.id,
 				level = C_QuestLog.GetQuestDifficultyLevel(quest.id),
+				levelBefore = quest.levelBefore,
 				before = DifficultyName(quest.before),
 				after = DifficultyName(after),
 			}
@@ -216,10 +218,11 @@ local function Report(run)
 		end
 	end
 	print(
-		("|cff3fa9f5Clickable Quest Links self-test:|r %d of %d checks passed (%s, %s). /reload writes the results to disk."):format(
+		("|cff3fa9f5Clickable Quest Links self-test:|r %d of %d checks passed (%s; answering: %s; %s). /reload writes the results to disk."):format(
 			passed,
 			run.total,
 			#databases > 0 and table.concat(databases, ", ") or "no quest database",
+			run.answering or "none",
 			run.locale
 		)
 	)
@@ -276,18 +279,24 @@ local function Run()
 		end
 	end
 	run.polestarData = C_AddOns.IsAddOnLoaded("Polestar_QuestDB") or nil
-	local answering
 	for _, name in ipairs(DATABASES) do
-		answering = answering or (run.databases[name] and name)
+		-- Polestar's quest data is the load-on-demand Polestar_QuestDB, which Polestar loads for its quest features.
+		if run.databases[name] and (name ~= "Polestar" or run.polestarData) then
+			run.answering = run.answering or name
+		end
 	end
 	if run.locale ~= "enUS" then
 		run.skipped = "the expected lines are the English client's"
-	elseif not answering then
-		run.skipped = "no quest database is loaded"
-	elseif not WITH_THESE_LINES[answering] then
-		run.skipped = answering .. " answers, with other lines (no quest levels, NPC names once the client knows them)"
+	elseif not run.answering then
+		run.skipped = run.databases.Polestar and "Polestar's quest data (Polestar_QuestDB) is not loaded"
+			or "no quest database is loaded"
+	elseif not WITH_THESE_LINES[run.answering] then
+		run.skipped = run.answering
+			.. " answers: Starts and Ends not checked (their names come from what the client or DonData has learned)"
 	end
-	local exact = not run.skipped
+	-- Links are checked exactly whenever an English client has a database answering; DonData only gets the Level lines.
+	local exact = run.locale == "enUS" and run.answering ~= nil
+	local allLines = exact and WITH_THESE_LINES[run.answering]
 
 	-- Errors from any addon during the run, passed on to whatever handler was there (BugGrabber, the default).
 	local previous = geterrorhandler()
@@ -331,7 +340,9 @@ local function Run()
 					run.tooltips[case.message] = lines
 					check(case.message .. ": tooltip opens", shown, #lines .. " lines")
 					for _, want in ipairs(exact and case.lines or {}) do
-						check(case.message .. ": " .. want, HasLine(lines, want), table.concat(lines, " / "))
+						if allLines or want:find("^Level:") then
+							check(case.message .. ": " .. want, HasLine(lines, want), table.concat(lines, " / "))
+						end
 					end
 					local linkColor = case.text:match("^|c(%x%x%x%x%x%x%x%x)|H")
 					local difficulty = QuestLogDifficulty(case.questID)

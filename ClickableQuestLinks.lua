@@ -512,6 +512,15 @@ local function ClientTitle(questID)
 	end
 end
 
+-- The quest's level from the client's data, for a link without one and a database without levels (DonData). Only
+-- once the client has the quest, as in LinkColor, whose quest log colour is a placeholder until then.
+local function ClientLevel(questID)
+	if ClientTitle(questID) then
+		local level = C_QuestLog.GetQuestDifficultyLevel(questID)
+		return type(level) == "number" and level > 0 and level or nil
+	end
+end
+
 -- The quest's difficulty colour for this character, or yellow. Forever's quest log colours by
 -- C_PlayerInfo.GetContentDifficultyQuestForPlayer, which works from the client's data for the quest and keeps a quest
 -- green further down than GetQuestDifficultyColor's level rule does (level 30 at level 36: green, the rule says
@@ -550,7 +559,10 @@ local function QuestLink(id, sentName, sentLevel)
 		requested[questID] = true
 		C_QuestLog.RequestLoadQuestByID(questID)
 	end
-	local level = (info and info.level) or tonumber(sentLevel and sentLevel:match("^%-?%d+")) or -1
+	local level = (info and info.level)
+		or tonumber(sentLevel and sentLevel:match("^%-?%d+"))
+		or ClientLevel(questID)
+		or -1
 	local name = title or (info and info.name) or sentName -- the client's title is in the player's language
 	linkNames[questID] = name
 	return QUEST_LINK:format(LinkColor(questID, level, title ~= nil), questID, level, name)
@@ -694,6 +706,9 @@ local function AddQuestInfo(tooltip, questID, linkLevel)
 	end
 	tooltip:AddLine(" ")
 	local level, required = info.level or linkLevel, info.requiredLevel
+	if not (level and level > 0) then
+		level = ClientLevel(questID)
+	end
 	if level and level > 0 then
 		local text = tostring(level)
 		if required and required > 0 and required ~= level then
