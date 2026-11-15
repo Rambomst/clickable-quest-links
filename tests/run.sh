@@ -1,36 +1,20 @@
 #!/usr/bin/env bash
-# Runs the Clickable Quest Links scenario tests on SkillUp Forever's headless Forever client (forever_sim).
+# Runs the Clickable Quest Links scenario tests on forever_sim, the headless Forever client from cjber/forever-core.
 #
 #   tests/run.sh                 # every scenario
 #   tests/run.sh "shift-click"   # scenarios whose name contains the text
 #
-# Needs luajit, curl, python3 and a clone of github.com/cjber/skillup-forever whose sim cache was fetched once with
-# `python3 tools/forever_sim/fetch.py`. FOREVER_SIM_REPO points at the clone; by default it is a skillup-forever
-# folder next to this repository. CI pins the commit the tests were last run against (.github/workflows/ci.yml).
-# The sim writes rewritten Blizzard code to its cache, so this keeps a private one that links to the clone's
-# downloads instead of writing into the clone. The released quest databases the "real" scenarios read are fetched
-# into the same cache once.
+# Needs luajit, python3, git and curl. tests/sim.sh gets forever_sim at the commit in tests/forever_sim.txt (or the
+# folder FOREVER_SIM names) and what it runs against into ~/.cache/questlinks-sim, which QUESTLINKS_CACHE moves. The
+# released quest databases the "real" scenarios read are fetched into the same cache once.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="${FOREVER_SIM_REPO:-$(cd "$here/../.." && pwd)/skillup-forever}"
-cache="${QUESTLINKS_SIM_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/questlinks-sim}"
-
-if [[ ! -f "$repo/tools/forever_sim/sim.lua" ]]; then
-	echo "forever_sim not found under $repo (set FOREVER_SIM_REPO)" >&2
-	exit 2
-fi
-for d in wow-ui-source data db2; do
-	if [[ ! -e "$repo/tools/.cache/forever_sim/$d" ]]; then
-		echo "missing $repo/tools/.cache/forever_sim/$d: run python3 tools/forever_sim/fetch.py in $repo" >&2
-		exit 2
-	fi
-done
-
-mkdir -p "$cache/taint"
-for d in wow-ui-source data db2; do
-	ln -sfn "$repo/tools/.cache/forever_sim/$d" "$cache/$d"
-done
+sim_env=$("$here/sim.sh")
+while IFS='=' read -r name value; do
+	export "$name=$value"
+done <<<"$sim_env"
+cache=$QUESTLINKS_CACHE
 
 # The released quest databases the "real" scenarios read. By default the pinned releases below, checked against their
 # SHA-256 so the scenarios' expected lines match their data, unpacked once into $cache/addons/<name>-<version>.
@@ -99,8 +83,6 @@ if [[ -n "$summary" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 	printf '| Database | Newest release | Pinned |\n| --- | --- | --- |\n%s' "$summary" >>"$GITHUB_STEP_SUMMARY"
 fi
 
-export FOREVER_SIM="$repo/tools/forever_sim/"
-export QUESTLINKS_SIM_CACHE="$cache"
 export REAL_QUESTIEDB="${REAL_QUESTIEDB:-${where[QuestieDB]}/QuestieDB}"
 export REAL_DING="${REAL_DING:-${where[Ding]}/Ding}"
 export REAL_DONDATA="${REAL_DONDATA:-${where[DonData]}/DonData}"

@@ -1,6 +1,6 @@
 -- Chat messages for the listing screenshots (tools/screenshots.py): each one as it arrives and as the addon's own
--- chat filter rewrites it on SkillUp Forever's headless Forever client (forever_sim). Prints one JSON object per
--- line: {"before": ..., "after": ...}.
+-- chat filter rewrites it on forever_sim, the headless Forever client from cjber/forever-core. Prints one JSON
+-- object per line: {"before": ..., "after": ...}.
 --
 -- Run through tools/screenshots.py, which sets FOREVER_SIM, QUESTLINKS_SIM_CACHE and the messages (one per line on
 -- stdin) and the player's level (QUESTLINKS_SCENE_LEVEL).

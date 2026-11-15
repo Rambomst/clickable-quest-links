@@ -1,7 +1,7 @@
--- Scenario tests for Clickable Quest Links on SkillUp Forever's headless Forever client (forever_sim): Blizzard's
--- real chat filter registry (ChatFrameUtil), SetItemRef and ItemRefTooltip, with stand-ins for the quest databases
--- (fixtures/) and, for the "real" scenarios, their released builds. Run with tests/run.sh, which sets FOREVER_SIM,
--- QUESTLINKS_SIM_CACHE and the REAL_* paths.
+-- Scenario tests for Clickable Quest Links on forever_sim, the headless Forever client from cjber/forever-core:
+-- Blizzard's real chat filter registry (ChatFrameUtil), SetItemRef and ItemRefTooltip, with stand-ins for the quest
+-- databases (fixtures/) and, for the "real" scenarios, their released builds. Run with tests/run.sh, which sets
+-- FOREVER_SIM, QUESTLINKS_SIM_CACHE and the REAL_* paths.
 local here = debug.getinfo(1, "S").source:match("^@(.*[/\\])") or "./"
 local SIM = assert(os.getenv("FOREVER_SIM"), "FOREVER_SIM is not set: run tests/run.sh")
 local CACHE = assert(os.getenv("QUESTLINKS_SIM_CACHE"), "QUESTLINKS_SIM_CACHE is not set: run tests/run.sh")

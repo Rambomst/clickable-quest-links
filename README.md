@@ -77,23 +77,24 @@ Lua is formatted with [StyLua](https://github.com/JohnnyMorganz/StyLua): run `st
 
 ### Tests
 
-The tests run the addon on forever_sim, the headless Forever client in
-[SkillUp Forever's repository](https://github.com/cjber/skillup-forever), against Blizzard's real chat and tooltip
-code. They need LuaJIT, Python 3, curl and a SkillUp Forever clone next to this repository:
+The tests run the addon on forever_sim, the headless Forever client from
+[forever-core](https://github.com/cjber/forever-core), against Blizzard's real chat and tooltip code. They need
+LuaJIT, Python 3, git and curl:
 
 ```bash
-git clone https://github.com/cjber/skillup-forever ../skillup-forever
-(cd ../skillup-forever && python3 tools/forever_sim/fetch.py)
 tests/run.sh
 ```
 
+The first run downloads forever_sim at the commit pinned in `tests/forever_sim.txt`, the Blizzard UI source and
+client data it runs against, and the quest databases the "real" scenarios read, into `~/.cache/questlinks-sim`.
+
 - `tests/run.sh "shift-click"` runs only the scenarios whose names contain that text.
-- `FOREVER_SIM_REPO` points the tests at a clone somewhere else. CI tests against the commit in
-  `.github/workflows/ci.yml` (`FOREVER_SIM_COMMIT`); if a newer one fails, check that one out.
+- `FOREVER_SIM` points the tests at another forever_sim folder, such as the one in a forever-core checkout
+  (`.agents/skills/wow-forever-addon/tooling/forever_sim`).
 - Most scenarios use small stand-ins for the quest databases. The "real" ones read released QuestieDB, Ding!,
-  Polestar and DonData builds, pinned in `tests/run.sh` and downloaded on the first run.
-  `QUESTLINKS_DATABASES=latest` takes each one's newest release instead (needs the GitHub CLI), and
-  `REAL_QUESTIEDB`, `REAL_DING`, `REAL_POLESTAR` and `REAL_DONDATA` point at copies of your own.
+  Polestar and DonData builds, pinned in `tests/run.sh`. `QUESTLINKS_DATABASES=latest` takes each one's newest
+  release instead (needs the GitHub CLI), and `REAL_QUESTIEDB`, `REAL_DING`, `REAL_POLESTAR` and `REAL_DONDATA`
+  point at copies of your own.
 
 CI runs the tests on every push and pull request.
 

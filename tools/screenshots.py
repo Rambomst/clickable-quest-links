@@ -2,12 +2,11 @@
 
     python3 tools/screenshots.py
 
-The chat text comes from tools/scene.lua: the addon's chat filter, run on SkillUp Forever's headless Forever client
-(forever_sim). FOREVER_SIM_REPO points at a skillup-forever clone whose sim cache was fetched once with
-`python3 tools/forever_sim/fetch.py` (default: a clone next to this repository). The lines are drawn with
+The chat text comes from tools/scene.lua: the addon's chat filter, run on forever_sim, the headless Forever client
+the tests use, as tests/sim.sh fetches it (pinned in tests/forever_sim.txt). The lines are drawn with
 forever-core's wowmock (FOREVER_CORE, default: a forever-core clone next to this repository) in the client's chat
 font and class colours, fetched from wago.tools for wowmock's pinned build and cached under ~/.cache/wowmock/.
-Needs luajit and Pillow. Player names are made up; quest names, IDs and levels are QuestieDB 1.1.1's.
+Needs luajit, git and Pillow. Player names are made up; quest names, IDs and levels are QuestieDB 1.1.1's.
 
 The tooltip screenshots in docs/screenshots are in-game captures, not renders.
 """
@@ -21,11 +20,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "docs" / "screenshots"
-SIM_REPO = Path(os.environ.get("FOREVER_SIM_REPO", REPO.parent / "skillup-forever")).expanduser()
 FOREVER_CORE = Path(os.environ.get("FOREVER_CORE", REPO.parent / "forever-core")).expanduser()
-SIM_CACHE = Path(
-    os.environ.get("QUESTLINKS_SIM_CACHE", Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "questlinks-sim")
-).expanduser()
 
 if not (FOREVER_CORE / "tools" / "wowmock" / "wowmock.py").is_file():
     sys.exit(f"wowmock.py not found under {FOREVER_CORE}; set FOREVER_CORE to a forever-core checkout")
@@ -63,24 +58,11 @@ HYPERLINK = re.compile(r"\|H[^|]*\|h|\|h")
 
 
 def sim_env():
-    """The environment tests/run.sh gives the scenarios: a private sim cache linked to the clone's downloads."""
-    if not (SIM_REPO / "tools" / "forever_sim" / "sim.lua").is_file():
-        sys.exit(f"forever_sim not found under {SIM_REPO} (set FOREVER_SIM_REPO)")
-    (SIM_CACHE / "taint").mkdir(parents=True, exist_ok=True)
-    for name in ("wow-ui-source", "data", "db2"):
-        source = SIM_REPO / "tools" / ".cache" / "forever_sim" / name
-        if not source.exists():
-            sys.exit(f"missing {source}: run python3 tools/forever_sim/fetch.py in {SIM_REPO}")
-        link = SIM_CACHE / name
-        if link.is_symlink() or link.exists():
-            link.unlink()
-        link.symlink_to(source)
+    """The environment tests/run.sh gives the scenarios, from tests/sim.sh, which fetches what is missing."""
+    printed = subprocess.run([REPO / "tests" / "sim.sh"], check=True, stdout=subprocess.PIPE, text=True).stdout
     env = dict(os.environ)
-    env.update(
-        FOREVER_SIM=f"{SIM_REPO / 'tools' / 'forever_sim'}/",
-        QUESTLINKS_SIM_CACHE=str(SIM_CACHE),
-        QUESTLINKS_SCENE_LEVEL=str(LEVEL),
-    )
+    env.update(line.split("=", 1) for line in printed.splitlines() if "=" in line)
+    env["QUESTLINKS_SCENE_LEVEL"] = str(LEVEL)
     return env
 
 
