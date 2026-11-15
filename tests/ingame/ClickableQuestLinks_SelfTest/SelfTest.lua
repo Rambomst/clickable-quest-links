@@ -247,7 +247,7 @@ local function Report(run)
 	end
 end
 
-local function Run(onDone)
+local function Run(onDone, round)
 	if running then
 		print("Clickable Quest Links self-test: already running.")
 		return
@@ -312,6 +312,10 @@ local function Run(onDone)
 		ItemRefTooltip:Hide()
 		seterrorhandler(previous)
 		check("no Lua errors during the run", #run.errors == 0, run.errors[1])
+		if round then
+			run.round = round
+			check("only " .. round .. " answers in its round", run.answering == round, run.answering)
+		end
 		Report(run)
 		running = false
 		if onDone then
@@ -399,6 +403,8 @@ local function Say(message)
 	print("|cff3fa9f5Clickable Quest Links self-test:|r " .. message)
 end
 
+-- As Blizzard's AddOns list does in game: the character is the player's GUID, and the changes last past a reload
+-- only once saved.
 local function SetDatabaseAddOns(character, enabled)
 	for _, name in ipairs(DATABASE_ADDONS) do
 		if C_AddOns.DoesAddOnExist(name) then
@@ -409,6 +415,7 @@ local function SetDatabaseAddOns(character, enabled)
 			end
 		end
 	end
+	C_AddOns.SaveAddOns()
 end
 
 local function Reload(message)
@@ -421,7 +428,7 @@ local function StartRounds(queue)
 		Say("no quest database is installed.")
 		return
 	end
-	local rounds = { queue = queue, character = UnitName("player"), restore = {} }
+	local rounds = { queue = queue, character = UnitGUID("player"), restore = {} }
 	for _, name in ipairs(DATABASE_ADDONS) do
 		if C_AddOns.DoesAddOnExist(name) then
 			rounds.restore[name] = C_AddOns.GetAddOnEnableState(name, rounds.character) > 0
@@ -442,8 +449,7 @@ local function ContinueRounds(rounds)
 			C_Timer.After(1, go)
 			return
 		end
-		Run(function(run)
-			run.round = database
+		Run(function()
 			table.remove(rounds.queue, 1)
 			if rounds.queue[1] then
 				SetDatabaseAddOns(rounds.character, ROUND_ADDONS[rounds.queue[1]] or {})
@@ -453,7 +459,7 @@ local function ContinueRounds(rounds)
 				ClickableQuestLinks_SelfTestDB.rounds = nil
 				Reload("rounds done, the AddOns list is back as it was.")
 			end
-		end)
+		end, database)
 	end
 	go()
 end

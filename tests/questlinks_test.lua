@@ -774,24 +774,39 @@ for _, database in ipairs({
 end
 
 scenario("the in-game self-test's rounds run each installed database alone, then put the AddOns list back", function()
-	-- The character's enable states for the databases' addons, kept by the client across reloads.
+	-- The character's enable states for the databases' addons, kept by the client across reloads. As in the client
+	-- (Blizzard's AddOns list), a change counts only for the player's GUID, and lasts past a reload only once saved.
+	local GUID = "Player-91-0ABCDEF0"
 	local states = { QuestieDB = true, Ding = true, DonData = true }
+	local unsaved = {}
 	local reloads = 0
 	local function client(sim)
+		sim.impl.UnitGUID = function(unit)
+			return unit == "player" and GUID or nil
+		end
 		sim.impl["C_AddOns.DoesAddOnExist"] = function(name)
 			return states[name] ~= nil
 		end
-		sim.impl["C_AddOns.GetAddOnEnableState"] = function(name)
-			return states[name] and 2 or 0
+		sim.impl["C_AddOns.GetAddOnEnableState"] = function(name, character)
+			return character == GUID and states[name] and 2 or 0
 		end
-		sim.impl["C_AddOns.EnableAddOn"] = function(name)
-			states[name] = true
+		sim.impl["C_AddOns.EnableAddOn"] = function(name, character)
+			unsaved[name] = character == GUID or nil
 		end
-		sim.impl["C_AddOns.DisableAddOn"] = function(name)
-			states[name] = false
+		sim.impl["C_AddOns.DisableAddOn"] = function(name, character)
+			if character == GUID then
+				unsaved[name] = false
+			end
+		end
+		sim.impl["C_AddOns.SaveAddOns"] = function()
+			for name, on in pairs(unsaved) do
+				states[name] = on
+			end
+			unsaved = {}
 		end
 		sim.impl["C_UI.Reload"] = function()
 			reloads = reloads + 1
+			unsaved = {}
 		end
 	end
 	local function enabled()
