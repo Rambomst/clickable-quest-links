@@ -2,8 +2,9 @@
 
 Paste these into the project settings. The repository is the source of truth; edit here first.
 
-The live page has v1.0.0's text, which names only QuestieDB. When v1.1.0 is released, paste this description and
-the third screenshot's new description.
+The live page matches this text since 2026-11-15 (v1.1.2): the description and the third screenshot's description.
+CurseForge's editor keeps the description as Markdown in its own style (`*   ` bullets, the brackets in the example
+escaped), so change the sentences there rather than pasting the whole section over it.
 
 ## Summary
 
@@ -48,7 +49,7 @@ captures.
 3. `docs/screenshots/tooltip-start-end.png`
    - Title: Who starts and ends it
    - Description: Click a link to open the quest. With a quest database, the tooltip adds the quest's level and who
-     starts and ends it, with their zone. (v1.0.0's live text says "With QuestieDB".)
+     starts and ends it, with their zone.
 4. `docs/screenshots/tooltip-objectives.png`
    - Title: Objectives and level
    - Description: The game's own objectives, with the quest's level and the level it requires.
