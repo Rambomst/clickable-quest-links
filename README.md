@@ -7,9 +7,11 @@ links. Only another Questie user's game turns that text back into a link; everyo
 
 This addon turns that text into the game's own quest link:
 
-- **Click it** to open Blizzard's quest tooltip. With [QuestieDB](https://www.curseforge.com/wow/addons/questiedb)
-  installed, the tooltip also shows the quest's level, the level it requires, and who starts and ends it, with their
-  zone. That works for every quest link you open from chat, including normal ones.
+![Questie's text in chat, and the same messages with the addon](docs/screenshots/before-after.png)
+
+- **Click it** to open Blizzard's quest tooltip. With a [quest database](#quest-databases) installed, the tooltip
+  also shows the quest's level, the level it requires, and who starts and ends it, with their zone. That works for
+  every quest link you open from chat, including normal ones.
 - **Shift-click it** to put it in your chat message. If the quest is in your quest log, it goes in as the game's own
   quest link, which anyone can click. If not, it goes in as Questie's text, which Questie users and players with this
   addon see as a link: a quest link made by an addon arrives as plain text. The same goes for any quest link you
@@ -20,14 +22,31 @@ This addon turns that text into the game's own quest link:
 
 ## What gets converted
 
-- `[[34] Raptor Mastery (194)]`, which Questie sends when it shows quest levels. With QuestieDB installed, only quests
-  it knows are converted.
-- `[Raptor Mastery (194)]`, which Questie sends when quest levels are hidden. Only with QuestieDB installed, and only
-  when the name matches the quest, because text like that turns up in normal chat too.
+- `[[34] Raptor Mastery (194)]`, which Questie sends when it shows quest levels. Always converted, even for a quest
+  your quest database doesn't have yet.
+- `[Raptor Mastery (194)]`, which Questie sends when quest levels are hidden. Only when a quest database or the game
+  itself knows that quest by that name, because text like that turns up in normal chat too.
 - Item links and other links in the same message are left alone.
 - With Questie installed, this addon does nothing: Questie already handles these links.
 
 Messages the game hides from addons, as it can in instances, stay as they are.
+
+## Quest databases
+
+The extra tooltip lines come from whichever of these you already run. When you have more than one, the first in this
+list that knows the quest is used:
+
+| Addon | Gives |
+| --- | --- |
+| [QuestieDB](https://www.curseforge.com/wow/addons/questiedb) | level, required level, who starts and ends the quest, with their zone |
+| [Ding!](https://www.curseforge.com/wow/addons/ding-xp-and-leveling-guide) (its DingDB) | the same, and English quest names, so `[Name (id)]` from an English client converts on any client |
+| [Polestar Guides](https://www.curseforge.com/wow/addons/polestar) | the same, while one of Polestar's quest features is on (its quest data loads only then) |
+| [DonData](https://www.curseforge.com/wow/addons/dondata) (with Questdon or Leveldon) | the required level and one starter and finisher; the level comes from the link |
+
+With none of them, links still convert and open Blizzard's own quest tooltip.
+
+RestedXP has no quest data to read: its Forever files map quests to items, and quest and NPC names appear only in
+guide text.
 
 ## Translations
 
@@ -48,6 +67,18 @@ tests/run.sh
 
 `FOREVER_SIM_REPO` points the tests at a clone somewhere else. CI runs them on every push, pinned to the commit in
 `.github/workflows/ci.yml`.
+
+The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat
+filter on forever_sim, and `tools/screenshots.py` draws the result with
+[forever-core](https://github.com/cjber/forever-core)'s wowmock, in the client's chat font and class colours. They
+need Pillow and a forever-core clone next to this repository (`FOREVER_CORE` points elsewhere):
+
+```bash
+git clone https://github.com/cjber/forever-core ../forever-core
+python3 tools/screenshots.py
+```
+
+The tooltip screenshots are in-game captures.
 
 Pushing a `v*` tag runs the tests, then BigWigsMods/packager builds the zip and publishes it to GitHub Releases,
 CurseForge and, when configured, Wago.

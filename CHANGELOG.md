@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.0
+
+- Quest tooltips also read Ding!'s DingDB, Polestar's quest database and DonData, not only QuestieDB: whichever you
+  run. With more than one, QuestieDB comes first, then Ding!, Polestar and DonData.
+- `[[34] Raptor Mastery (194)]` now converts even for a quest your quest database doesn't have yet.
+- `[Raptor Mastery (194)]` also converts when the game itself knows the quest by that name, or, with Ding!, by its
+  English name.
+
 ## v1.0.0
 
 First release.

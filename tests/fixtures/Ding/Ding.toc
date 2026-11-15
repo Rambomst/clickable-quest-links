@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: Ding (test fake)
+## Notes: Stand-in for Ding!'s LibDingDB with a few quests, for the Clickable Quest Links tests.
+
+Ding.lua

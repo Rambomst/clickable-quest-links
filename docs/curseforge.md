@@ -2,6 +2,9 @@
 
 Paste these into the project settings. The repository is the source of truth; edit here first.
 
+The live page has v1.0.0's text, which names only QuestieDB. When v1.1.0 is released, paste this description and
+the third screenshot's new description.
+
 ## Summary
 
 Makes Questie's plain-text quest links clickable for players who don't use Questie.
@@ -13,8 +16,9 @@ you can't click them.
 
 **Clickable Quest Links** turns that text into the game's own quest link:
 
-- **Click it** to open the quest tooltip. With **QuestieDB** installed, it also shows the quest's level, the level it
-  requires, and who starts and ends it, with their zone. That works for every quest link you open from chat.
+- **Click it** to open the quest tooltip. With a quest database installed (**QuestieDB**, **Ding!**, **Polestar
+  Guides** or **DonData**), it also shows the quest's level, the level it requires, and who starts and ends it, with
+  their zone. That works for every quest link you open from chat.
 - **Shift-click it** to put it in your chat message: as the game's own quest link when the quest is in your quest log,
   otherwise as Questie's text, which Questie users and players with this addon see as a link.
 - **Its colour** shows how hard the quest is for you, as in your quest log. Prefer plain yellow? Turn off "Color links
@@ -22,6 +26,29 @@ you can't click them.
 
 If you install Questie later, this addon steps aside and lets Questie handle the links.
 
-**Optional:** QuestieDB, for the extra tooltip lines and for links sent without a quest level.
+**Optional:** any one of QuestieDB, Ding!, Polestar Guides or DonData, for the extra tooltip lines and for links sent
+without a quest level. It reads the one you already run.
 
 Bugs, ideas and translation fixes: https://github.com/Rambomst/clickable-quest-links/issues
+
+## Screenshots
+
+Under Media, in this order, with these titles and descriptions, all four marked Feature Media (uploaded 2026-11-15).
+The two chat images are drawn by `tools/screenshots.py` from the addon's own output; the two tooltips are in-game
+captures.
+
+1. `docs/screenshots/before-after.png`
+   - Title: Before and after
+   - Description: Questie's plain-text quest links become links you can click. Drawn from the addon's own output in
+     the game's chat font; the player names are made up.
+2. `docs/screenshots/difficulty-colors.png`
+   - Title: Colored by difficulty
+   - Description: Each link takes the quest's difficulty color for your character, as in the quest log. Turn it off
+     with /cql.
+3. `docs/screenshots/tooltip-start-end.png`
+   - Title: Who starts and ends it
+   - Description: Click a link to open the quest. With a quest database, the tooltip adds the quest's level and who
+     starts and ends it, with their zone. (v1.0.0's live text says "With QuestieDB".)
+4. `docs/screenshots/tooltip-objectives.png`
+   - Title: Objectives and level
+   - Description: The game's own objectives, with the quest's level and the level it requires.

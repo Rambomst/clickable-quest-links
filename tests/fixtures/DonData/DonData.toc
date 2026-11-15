@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: DonData (test fake)
+## Notes: Stand-in for DonData's DonDataAPI with two quests, for the Clickable Quest Links tests.
+
+DonData.lua

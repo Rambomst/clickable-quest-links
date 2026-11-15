@@ -1,2 +1,4 @@
 # Output of running BigWigsMods/packager's release.sh locally.
 .release/
+# Python bytecode from tools/screenshots.py.
+__pycache__/

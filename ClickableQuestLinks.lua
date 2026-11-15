@@ -10,9 +10,10 @@
 -- GetQuestLink or its text. So any quest link put in a chat box becomes the client's own link when the quest is in
 -- the quest log, and Questie's text otherwise, which Questie and this addon turn back into links.
 --
--- QuestieDB, when loaded, confirms the quest exists and adds its level and where it starts and ends to the tooltip
--- of every quest link opened from chat, native ones included. Without it only the "[[level] Name (id)]" form is
--- trusted: "[some text (123)]" also turns up in normal chat.
+-- A quest database, when one is loaded, adds the quest's level and where it starts and ends to the tooltip of every
+-- quest link opened from chat, native ones included: QuestieDB, Ding!'s DingDB, Polestar's or DonData's, the first
+-- that knows the quest. The "[[level] Name (id)]" form always converts. "[Name (id)]" also turns up in normal chat, so
+-- it converts only when a database or the client knows the quest by that name.
 --
 -- With Questie loaded this stays out of the way: Questie handles the same text with its own tooltip.
 
@@ -20,7 +21,6 @@ local QUEST_LINK = "|c%s|Hquest:%d:%d|h[%s]|h|r"
 local YELLOW = "ffffff00" -- the colour the client gives a quest link that has none (GetFixedLink)
 local QUESTIE_TEXT = "[[%d] %s (%d)]"
 local QUESTIE_TEXT_NO_LEVEL = "[%s (%d)]"
-local QUESTIEDB_CONTRACT = 4
 local MAX_NAMES = 2 -- starters or finishers named before "and N more"
 local LABEL = "|cffffd100%s|r %s"
 local DEFAULTS = {
@@ -161,18 +161,272 @@ local EVENTS = {
 
 local options = DEFAULTS -- the saved settings, once Start has loaded them
 
-local questieDB -- LibQuestieDB once bound; false when it is missing or speaks an incompatible contract
+-- Quest databases, best first. The first one that knows a quest answers for it, so whichever one a player runs is
+-- used. Each is checked once, on first use, and left out when its addon is missing or offers another interface.
+--
+-- Quest(handle, questID) returns nil or { name, englishName, level, requiredLevel, record }; chat links need only
+-- that. For a tooltip, Starts and Ends(handle, questID, info) list the quest's starters and finishers, each
+-- { kind, id } (kind "npc", "object" or "item") or text, with `total` when there are more than listed, and
+-- Place(handle, kind, id) names one: "Name (Zone)", or the item's name. A guarded source is read through pcall: it
+-- is another addon's internals, which may change or not have loaded yet.
 
-local function DB()
-	if questieDB == nil then
-		local lib = LibQuestieDB
-		local ok = lib and lib.Quest and lib.Npc and lib.Object and lib.Item
-		if ok and lib.RequireContract then
-			ok = lib.RequireContract(QUESTIEDB_CONTRACT)
+local KINDS = { "npc", "object", "item" }
+
+-- { npcIDs, objectIDs, itemIDs }, as QuestieDB and DingDB keep starters and finishers, as { kind, id } pairs.
+local function Entries(by)
+	local list = {}
+	if type(by) == "table" then
+		for index, kind in ipairs(KINDS) do
+			if type(by[index]) == "table" then
+				for _, id in ipairs(by[index]) do
+					list[#list + 1] = { kind, id }
+				end
+			end
 		end
-		questieDB = ok and lib or false
 	end
-	return questieDB or nil
+	return list
+end
+
+local function WithZone(name, zone)
+	if type(zone) == "string" and zone ~= "" then
+		return ("%s (%s)"):format(name, zone)
+	end
+	return name
+end
+
+local function AreaName(areaID)
+	return areaID and areaID > 0 and C_Map.GetAreaInfo(areaID) or nil
+end
+
+local function MapName(uiMapID)
+	local info = uiMapID and C_Map.GetMapInfo(uiMapID)
+	return info and info.name
+end
+
+-- The map with the most spawns, from { [uiMapID] = count }; the lowest ID of a tie, so the answer is stable.
+local function Busiest(counts)
+	local best, most
+	for map, count in pairs(counts) do
+		if type(map) == "number" and (not most or count > most or (count == most and map < best)) then
+			best, most = map, count
+		end
+	end
+	return best
+end
+
+local function ItemText(name)
+	return type(name) == "string" and L.ITEM:format(name) or nil
+end
+
+local QUESTIEDB_CONTRACT = 4
+
+local SOURCES = {
+	{
+		-- QuestieDB: LibQuestieDB, Get(id, field) on each entity; zones are AreaIDs.
+		Bind = function()
+			local lib = LibQuestieDB
+			local ok = type(lib) == "table" and lib.Quest and lib.Npc and lib.Object and lib.Item
+			if ok and lib.RequireContract then
+				ok = lib.RequireContract(QUESTIEDB_CONTRACT)
+			end
+			return ok and lib or nil
+		end,
+		Quest = function(lib, questID)
+			local quest = lib.Quest
+			local name = quest.Get(questID, "name")
+			if not name then
+				return nil
+			end
+			return {
+				name = name,
+				level = tonumber(quest.Get(questID, "questLevel")),
+				requiredLevel = tonumber(quest.Get(questID, "requiredLevel")),
+			}
+		end,
+		Starts = function(lib, questID)
+			return Entries(lib.Quest.Get(questID, "startedBy"))
+		end,
+		Ends = function(lib, questID)
+			return Entries(lib.Quest.Get(questID, "finishedBy"))
+		end,
+		Place = function(lib, kind, id)
+			if kind == "item" then
+				return ItemText(lib.Item.Get(id, "name"))
+			end
+			local entity = kind == "npc" and lib.Npc or lib.Object
+			local name = entity.Get(id, "name")
+			if not name then
+				return nil
+			end
+			local areaID = tonumber(entity.Get(id, "zoneID"))
+			if not areaID or areaID <= 0 then
+				local spawns = entity.Get(id, "spawns")
+				areaID = type(spawns) == "table" and tonumber((next(spawns))) or nil
+			end
+			return WithZone(name, AreaName(areaID))
+		end,
+	},
+	{
+		-- Ding!'s DingDB: LibDingDB (its docs/dingdb.md), QuestieDB's records by field name; spawns are by UiMapID.
+		Bind = function()
+			local lib = LibDingDB
+			return type(lib) == "table" and type(lib.Get) == "function" and type(lib.Name) == "function" and lib or nil
+		end,
+		Quest = function(lib, questID)
+			local quest = lib.Get("quest", questID)
+			if type(quest) ~= "table" or not quest.name then
+				return nil
+			end
+			return {
+				name = quest.name,
+				englishName = quest.englishName,
+				level = tonumber(quest.questLevel),
+				requiredLevel = tonumber(quest.requiredLevel),
+				record = quest,
+			}
+		end,
+		Starts = function(_, _, info)
+			return Entries(info.record.startedBy)
+		end,
+		Ends = function(_, _, info)
+			return Entries(info.record.finishedBy)
+		end,
+		Place = function(lib, kind, id)
+			if kind == "item" then
+				return ItemText(lib.Name("item", id))
+			end
+			local entity = lib.Get(kind, id)
+			if type(entity) ~= "table" or not entity.name then
+				return nil
+			end
+			local counts = {}
+			for map, points in pairs(type(entity.spawns) == "table" and entity.spawns or {}) do
+				counts[map] = type(points) == "table" and #points or 0
+			end
+			return WithZone(entity.name, MapName(Busiest(counts)))
+		end,
+	},
+	{
+		-- Polestar's quest database (Polestar.QuestDB, its Quests/QuestDB.lua). Polestar keeps it for itself, and its
+		-- data loads only while one of Polestar's quest features is on. Spawns are by UiMapID.
+		guarded = true,
+		Bind = function()
+			local db = type(Polestar) == "table" and Polestar.QuestDB
+			return type(db) == "table" and type(db.GetQuest) == "function" and db or nil
+		end,
+		Quest = function(db, questID)
+			local quest = db.GetQuest(questID)
+			if type(quest) ~= "table" or not quest.title then
+				return nil
+			end
+			return {
+				name = quest.title,
+				level = tonumber(quest.level),
+				requiredLevel = tonumber(quest.minLevel),
+				record = quest,
+			}
+		end,
+		Starts = function(_, _, info)
+			local start = type(info.record.start) == "table" and info.record.start or {}
+			return Entries({ start.npc, start.object, start.item })
+		end,
+		Ends = function(_, _, info)
+			local finish = type(info.record.finish) == "table" and info.record.finish or {}
+			return Entries({ finish.npc, finish.object })
+		end,
+		Place = function(db, kind, id)
+			if kind == "item" then
+				local item = db.GetItem(id)
+				return ItemText(type(item) == "table" and item.name)
+			end
+			local entity = (kind == "npc" and db.GetNpc or db.GetObject)(id)
+			if type(entity) ~= "table" or not entity.name then
+				return nil
+			end
+			local counts = {}
+			for _, spawn in ipairs(type(entity.spawns) == "table" and entity.spawns or {}) do
+				if type(spawn) == "table" and type(spawn.map) == "number" then
+					counts[spawn.map] = (counts[spawn.map] or 0) + 1
+				end
+			end
+			return WithZone(entity.name, MapName(Busiest(counts)))
+		end,
+	},
+	{
+		-- DonData's DonDataAPI (its Engine/API.lua, version 4), which Questdon and Leveldon use: no quest level, and
+		-- one starter and one finisher by name, with their map.
+		guarded = true,
+		Bind = function()
+			local api = DonDataAPI
+			local ok = type(api) == "table" and (tonumber(api.version) or 0) >= 4 and type(api.GetQuest) == "function"
+			return ok and api or nil
+		end,
+		Quest = function(api, questID)
+			local quest = api.GetQuest(questID)
+			if type(quest) ~= "table" then
+				return nil
+			end
+			local name = api.QuestTitle(questID) or quest.name
+			if type(name) ~= "string" or name == "" then
+				return nil
+			end
+			return { name = name, requiredLevel = tonumber(quest.minLevel), record = quest }
+		end,
+		Starts = function(api, questID, info)
+			local starts = {}
+			local map, _, _, giver = api.QuestStart(questID)
+			if type(giver) == "string" then
+				starts[1] = WithZone(giver, MapName(map))
+			end
+			starts.total = type(info.record.givers) == "table" and #info.record.givers or 0
+			return starts
+		end,
+		Ends = function(api, questID)
+			local _, finisher = api.TurnInNpc(questID)
+			if type(finisher) ~= "string" then
+				return {}
+			end
+			-- Leaves out the map where DonData only guesses the turn-in: the giver's, or the next quest's giver's.
+			local map, _, _, from = api.TurnInPoint(questID)
+			local known = from == "data" or from == "blizzard" or from == "learned"
+			return { WithZone(finisher, known and MapName(map) or nil) }
+		end,
+		Place = function()
+			return nil
+		end,
+	},
+}
+
+local bound -- { source, handle } for each database whose addon is loaded, from the first lookup on
+
+local function Read(entry, method, ...)
+	local source, handle = entry[1], entry[2]
+	if not source.guarded then
+		return source[method](handle, ...)
+	end
+	local ok, result = pcall(source[method], handle, ...)
+	if ok then
+		return result
+	end
+end
+
+-- The quest's record from the first database that knows it, and that database.
+local function QuestInfo(questID)
+	if not bound then
+		bound = {}
+		for _, source in ipairs(SOURCES) do
+			local handle = source.Bind()
+			if handle then
+				bound[#bound + 1] = { source, handle }
+			end
+		end
+	end
+	for _, entry in ipairs(bound) do
+		local info = Read(entry, "Quest", questID)
+		if info then
+			return info, entry
+		end
+	end
 end
 
 local function SameName(a, b)
@@ -207,27 +461,22 @@ local function QuestLink(id, sentName, sentLevel)
 	if not questID or questID <= 0 or questID > 2147483647 then
 		return nil
 	end
-	local db = DB()
-	local dbName = db and db.Quest.Get(questID, "name")
-	if db and not dbName then
-		return nil -- not a quest QuestieDB knows; Questie skips these the same way
-	end
-	if not db and not sentLevel then
-		return nil
-	end
+	local info = QuestInfo(questID)
 	local title = ClientTitle(questID)
-	if not sentLevel and not (SameName(sentName, dbName) or SameName(sentName, title)) then
-		return nil
+	if not sentLevel then
+		local known = SameName(sentName, title)
+			or (info and (SameName(sentName, info.name) or SameName(sentName, info.englishName)))
+		if not known then
+			return nil
+		end
 	end
 	if not title and not requested[questID] then
 		-- Fetches the quest now so its tooltip has the quest text by the time the link is clicked.
 		requested[questID] = true
 		C_QuestLog.RequestLoadQuestByID(questID)
 	end
-	local level = (db and tonumber(db.Quest.Get(questID, "questLevel")))
-		or tonumber(sentLevel and sentLevel:match("^%-?%d+"))
-		or -1
-	local name = title or dbName or sentName -- the client's title is in the player's language
+	local level = (info and info.level) or tonumber(sentLevel and sentLevel:match("^%-?%d+")) or -1
+	local name = title or (info and info.name) or sentName -- the client's title is in the player's language
 	return QUEST_LINK:format(LinkColor(level), questID, level, name)
 end
 
@@ -325,72 +574,49 @@ local function OnInsertLink(text)
 	box:SetText((current:gsub(PatternEscape(text), (replacement:gsub("%%", "%%%%")))))
 end
 
--- "Name (Zone)" for an NPC or object.
-local function PlaceName(entity, id)
-	local name = entity.Get(id, "name")
-	if not name then
+-- Up to MAX_NAMES of a quest's starters or finishers, then "and N more".
+local function Describe(entry, list)
+	if type(list) ~= "table" then
 		return nil
 	end
-	local areaID = tonumber(entity.Get(id, "zoneID"))
-	if not areaID or areaID <= 0 then
-		local spawns = entity.Get(id, "spawns")
-		areaID = type(spawns) == "table" and tonumber((next(spawns))) or nil
-	end
-	local area = areaID and areaID > 0 and C_Map.GetAreaInfo(areaID)
-	if type(area) == "string" and area ~= "" then
-		return ("%s (%s)"):format(name, area)
-	end
-	return name
-end
-
--- Up to MAX_NAMES of a quest's starters or finishers ({ npcIDs, objectIDs, itemIDs }), then "and N more".
-local function Describe(db, by)
-	if type(by) ~= "table" then
-		return nil
-	end
-	local entities = { db.Npc, db.Object }
-	local names, total = {}, 0
-	for kind = 1, 3 do
-		local ids = type(by[kind]) == "table" and by[kind] or {}
-		for _, id in ipairs(ids) do
-			total = total + 1
-			if #names < MAX_NAMES then
-				local name
-				if kind == 3 then
-					local itemName = db.Item.Get(id, "name")
-					name = itemName and L.ITEM:format(itemName)
-				else
-					name = PlaceName(entities[kind], id)
-				end
-				names[#names + 1] = name
-			end
+	local names = {}
+	for _, item in ipairs(list) do
+		if #names >= MAX_NAMES then
+			break
+		end
+		local name = item
+		if type(item) == "table" then
+			name = Read(entry, "Place", item[1], item[2])
+		end
+		if type(name) == "string" then
+			names[#names + 1] = name
 		end
 	end
 	if #names == 0 then
 		return nil
 	end
 	local text = table.concat(names, ", ")
+	local total = math.max(tonumber(list.total) or 0, #list)
 	if total > #names then
 		text = L.MORE:format(text, total - #names)
 	end
 	return text
 end
 
-local function AddQuestInfo(tooltip, questID)
-	local db = DB()
-	if not db or not questID then
+-- linkLevel is the level on the link that was clicked, for a database that has no quest levels.
+local function AddQuestInfo(tooltip, questID, linkLevel)
+	if not questID then
 		return false
 	end
-	local quest = db.Quest
-	local name = quest.Get(questID, "name")
-	if not name then
+	local info, entry = QuestInfo(questID)
+	if not info then
 		return false
 	end
 	if tooltip:NumLines() == 0 then
-		tooltip:AddLine(name, 1, 1, 1)
+		tooltip:AddLine(info.name, 1, 1, 1)
 	end
 	tooltip:AddLine(" ")
-	local level, required = tonumber(quest.Get(questID, "questLevel")), tonumber(quest.Get(questID, "requiredLevel"))
+	local level, required = info.level or linkLevel, info.requiredLevel
 	if level and level > 0 then
 		local text = tostring(level)
 		if required and required > 0 and required ~= level then
@@ -398,19 +624,24 @@ local function AddQuestInfo(tooltip, questID)
 		end
 		tooltip:AddLine(LABEL:format(L.LEVEL, text), 1, 1, 1)
 	end
-	local starts = Describe(db, quest.Get(questID, "startedBy"))
+	local starts = Describe(entry, Read(entry, "Starts", questID, info))
 	if starts then
 		tooltip:AddLine(LABEL:format(L.STARTS, starts), 1, 1, 1, true)
 	end
-	local ends = Describe(db, quest.Get(questID, "finishedBy"))
+	local ends = Describe(entry, Read(entry, "Ends", questID, info))
 	if ends then
 		tooltip:AddLine(LABEL:format(L.ENDS, ends), 1, 1, 1, true)
 	end
 	return true
 end
 
-local function QuestIDFromLink(link)
-	return type(link) == "string" and tonumber(link:match("quest:(%d+)")) or nil
+-- The quest ID and level of a link holding "quest:ID:LEVEL".
+local function QuestFromLink(link)
+	if type(link) ~= "string" or (canaccessvalue and not canaccessvalue(link)) then
+		return nil
+	end
+	local id, level = link:match("quest:(%d+):?(%-?%d*)")
+	return tonumber(id), tonumber(level)
 end
 
 local function LinkOf(info)
@@ -476,13 +707,14 @@ local function Start()
 			if tooltip ~= ItemRefTooltip then
 				return
 			end
-			local questID = data and tonumber(data.id) or QuestIDFromLink(LinkOf(tooltip:GetPrimaryTooltipInfo()))
-			AddQuestInfo(tooltip, questID)
+			local linkID, linkLevel = QuestFromLink(LinkOf(tooltip:GetPrimaryTooltipInfo()))
+			local questID = data and tonumber(data.id) or linkID
+			AddQuestInfo(tooltip, questID, questID == linkID and linkLevel or nil)
 		end)
 	end
 
 	-- With no client data for a quest, Blizzard hides ItemRefTooltip and the click shows nothing, so this shows
-	-- QuestieDB's details instead. Hiding is also how Blizzard closes the tooltip on a second click of its link;
+	-- the quest database's details instead. Hiding is also how Blizzard closes the tooltip on a second click of its link;
 	-- the client having data tells the two apart, and closedLink/closedAt give the fallback the same close. Hiding
 	-- wipes the tooltip's own record of its link (ClearHandlerInfo), hence fallbackLink.
 	local fallbackLink, closedLink, closedAt
@@ -493,7 +725,7 @@ local function Start()
 		closedLink, closedAt, fallbackLink = fallbackLink, GetTime(), nil
 	end)
 	hooksecurefunc(ItemRefTooltip, "ItemRefSetHyperlink", function(tooltip, link)
-		local questID = QuestIDFromLink(link)
+		local questID, level = QuestFromLink(link)
 		if not questID or tooltip:IsShown() or C_TooltipInfo.GetHyperlink(link) then
 			return
 		end
@@ -501,7 +733,7 @@ local function Start()
 			return
 		end
 		tooltip:SetOwner(UIParent, "ANCHOR_PRESERVE")
-		if AddQuestInfo(tooltip, questID) then
+		if AddQuestInfo(tooltip, questID, level) then
 			tooltip:Show()
 			fallbackLink = link
 		end

@@ -8,7 +8,11 @@ ignore:
   - docs
   - media
   - tests
+  - tools
 
 # CurseForge slugs of the TOC's OptionalDeps.
 optional-dependencies:
   - questiedb
+  - ding-xp-and-leveling-guide
+  - polestar
+  - dondata

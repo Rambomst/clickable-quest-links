@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: Polestar (test fake)
+## Notes: Stand-in for Polestar's quest database with one quest, for the Clickable Quest Links tests.
+
+Polestar.lua

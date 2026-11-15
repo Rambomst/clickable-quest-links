@@ -9,6 +9,16 @@ local ADDON = "ClickableQuestLinks"
 -- the installed one.
 local ADDON_DIR = os.getenv("QUESTLINKS_ADDON_DIR") or (here .. "..")
 local FAKE_DB_DIR = here .. "fixtures/QuestieDB"
+-- The other quest databases the addon reads, as stand-ins with their APIs' shapes.
+local FAKE_SOURCES = { ding = "fixtures/Ding", polestar = "fixtures/Polestar", donData = "fixtures/DonData" }
+-- The UiMap names the fixtures' spawns need, as the pinned Forever build names those maps.
+local MAP_NAMES = {
+	[1411] = "Durotar",
+	[1413] = "The Barrens",
+	[1434] = "Stranglethorn Vale",
+	[1440] = "Ashenvale",
+	[1454] = "Orgrimmar",
+}
 
 local Sim = dofile(SIM .. "sim.lua")
 
@@ -18,7 +28,8 @@ local RAPTOR = "|cffffff00|Hquest:194:34|h[Raptor Mastery]|h|r"
 -- opts.questieDB (default true), opts.questie (Questie stand-in), opts.contract (fake QuestieDB contract),
 -- opts.addon (default true; false boots Blizzard's behaviour alone, for comparison), opts.locale (the client language
 -- the addon loads under), opts.saved (saved variables; by default difficulty colours are off, so converted links are
--- plain yellow), opts.level (the player's level; the sim's is 60).
+-- plain yellow), opts.level (the player's level; the sim's is 60), opts.ding, opts.polestar and opts.donData (load
+-- that database's stand-in), opts.polestarUnloaded (Polestar's reads fail, as before its data loads).
 local function boot(opts)
 	opts = opts or {}
 	local sim = Sim.new({ cache = CACHE })
@@ -41,6 +52,17 @@ local function boot(opts)
 	end
 	if opts.questieDB ~= false then
 		sim:addon(FAKE_DB_DIR)
+	end
+	for option, dir in pairs(FAKE_SOURCES) do
+		if opts[option] then
+			sim:addon(here .. dir)
+		end
+	end
+	if opts.polestarUnloaded then
+		sim.G.FAKE_POLESTAR_UNLOADED = true
+	end
+	for mapID, name in pairs(MAP_NAMES) do
+		sim.world.maps[mapID] = { name = name }
 	end
 	if opts.questie then
 		sim:stub("Questie")
@@ -171,9 +193,12 @@ scenario("plain form with another quest's ID is left alone", function()
 	eq(filtered(sim, msg), msg)
 end)
 
-scenario("unknown quest IDs are left alone", function()
+-- The level form is Questie's own, so it converts even for a quest the reader's database does not have yet; the plain
+-- form needs a name to check against.
+scenario("a quest no database knows converts only in the level form", function()
 	local sim = boot()
-	for _, msg in ipairs({ "[[10] Nope (99999)]", "[Nope (99999)]", "[[1] Huge (99999999999)]" }) do
+	eq(filtered(sim, "[[10] Nope (99999)]"), "|cffffff00|Hquest:99999:10|h[Nope]|h|r")
+	for _, msg in ipairs({ "[Nope (99999)]", "[[1] Huge (99999999999)]" }) do
 		eq(filtered(sim, msg), msg)
 	end
 end)
@@ -358,6 +383,84 @@ scenario("objects, items and long finisher lists", function()
 	click(G, filtered(sim, "[[20] A Note in the Water (9002)]"))
 	lines = tooltipLines(G)
 	assert(hasLine(lines, "Starts:|r Soggy Note (item)"), "item starter missing:\n" .. table.concat(lines, "\n"))
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("Ding!'s database gives the lines without QuestieDB, with zones from its UiMap spawns", function()
+	local sim, G = boot({ questieDB = false, ding = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[17] The Spirits of Stonetalon (1061)]"))
+	assert(G.ItemRefTooltip:IsShown(), "tooltip not shown")
+	local lines = tooltipLines(G)
+	eq(lines[1], "The Spirits of Stonetalon", "title")
+	assert(hasLine(lines, "Level:|r 17 (requires 13)"), "level line:\n" .. table.concat(lines, "\n"))
+	-- Zor Lonetree has more spawns in Orgrimmar than in Durotar.
+	assert(hasLine(lines, "Starts:|r Zor Lonetree (Orgrimmar)"), "start line")
+	assert(hasLine(lines, "Ends:|r Seereth Stonebreak (The Barrens)"), "end line")
+	click(G, filtered(sim, "[[15] Posted Bounty (7002)]"))
+	lines = tooltipLines(G)
+	assert(hasLine(lines, "Starts:|r Bounty Board (The Barrens)"), "object starter:\n" .. table.concat(lines, "\n"))
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("Ding!'s English names let a plain link from an English client convert on another", function()
+	local sim, G = boot({ questieDB = false, ding = true })
+	eq(filtered(sim, "[A Letter in the Water (7001)]"), "|cffffff00|Hquest:7001:12|h[Ein Brief im Wasser]|h|r")
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[A Letter in the Water (7001)]"))
+	assert(hasLine(tooltipLines(G), "Starts:|r Torn Letter (item)"), "item starter")
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("QuestieDB answers first, and Ding! for quests QuestieDB lacks", function()
+	local sim, G = boot({ ding = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[34] Raptor Mastery (194)]"))
+	local lines = tooltipLines(G)
+	assert(hasLine(lines, "Starts:|r Hemet Nesingwary Jr."), "QuestieDB's starter:\n" .. table.concat(lines, "\n"))
+	assert(not hasLine(lines, "Ding's Hemet"), "Ding's starter used over QuestieDB's")
+	click(G, filtered(sim, "[The Spirits of Stonetalon (1061)]"))
+	assert(hasLine(tooltipLines(G), "Starts:|r Zor Lonetree (Orgrimmar)"), "Ding's answer for a quest QuestieDB lacks")
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("Polestar's database gives the lines, with objects among the finishers", function()
+	local sim, G = boot({ questieDB = false, polestar = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[Cleansing the Oasis (2001)]"))
+	local lines = tooltipLines(G)
+	eq(lines[1], "Cleansing the Oasis", "title")
+	assert(hasLine(lines, "Level:|r 25 (requires 20)"), "level line:\n" .. table.concat(lines, "\n"))
+	assert(hasLine(lines, "Starts:|r Oasis Druid (The Barrens)"), "start line")
+	assert(hasLine(lines, "Ends:|r Grove Keeper (Ashenvale), Moonwell (Ashenvale)"), "end line")
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("Polestar's database before its data loads is passed over without errors", function()
+	local sim, G = boot({ questieDB = false, polestar = true, polestarUnloaded = true })
+	eq(filtered(sim, "[[25] Cleansing the Oasis (2001)]"), "|cffffff00|Hquest:2001:25|h[Cleansing the Oasis]|h|r")
+	local plain = "[Cleansing the Oasis (2001)]"
+	eq(filtered(sim, plain), plain)
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[25] Cleansing the Oasis (2001)]"))
+	assert(not G.ItemRefTooltip:IsShown(), "a tooltip with nothing to show")
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("DonData names a starter and a finisher, with the link's level", function()
+	local sim, G = boot({ questieDB = false, donData = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[14] Supplies for the Crossroads (4001)]"))
+	local lines = tooltipLines(G)
+	eq(lines[1], "Supplies for the Crossroads", "title")
+	assert(hasLine(lines, "Level:|r 14 (requires 12)"), "level line:\n" .. table.concat(lines, "\n"))
+	assert(hasLine(lines, "Starts:|r Supply Officer (The Barrens) and 1 more"), "start line")
+	assert(hasLine(lines, "Ends:|r Quartermaster (The Barrens)"), "end line")
+	click(G, filtered(sim, "[Word to the Wise (4002)]"))
+	lines = tooltipLines(G)
+	assert(hasLine(lines, "Ends:|r Distant Elder"), "end line:\n" .. table.concat(lines, "\n"))
+	assert(not hasLine(lines, "Distant Elder ("), "a guessed turn-in map")
+	assert(not hasLine(lines, "Level:"), "a level with none on the link or in DonData")
 	sim:expectNoErrors(ADDON)
 end)
 
