@@ -2,11 +2,11 @@
 -- ~/scripts/~scratch/wow-forever-quest-links/install.sh installs this next to the dev copy. /cqltest sends the quests
 -- the headless "real" scenarios use through this client's own chat filters and ItemRefTooltip, prints a summary and
 -- keeps the run in ClickableQuestLinks_SelfTestDB, which the client writes to disk at /reload or logout. What only
--- the real client has gets checked here: its zone names, its quest data, Blizzard's tooltip as it really runs.
--- tests/questlinks_test.lua runs this file on the headless client too.
+-- the real client has gets checked here: its zone names, its quest data, Blizzard's tooltip as it really runs, and
+-- the colour its quest log gives each quest. tests/questlinks_test.lua runs this file on the headless client too.
 
 -- What an English client shows when QuestieDB, Ding! or Polestar answers (the headless scenarios expect the same).
--- Links are matched without their colour, which follows the player's level.
+-- Links are matched without their colour, which follows the player's level and is checked against the quest log's.
 local CASES = {
 	{
 		message = "[[34] Raptor Mastery (194)]",
@@ -64,6 +64,8 @@ local WITH_THESE_LINES = { QuestieDB = true, Ding = true, Polestar = true }
 local KEEP_RUNS = 5
 -- Long enough for the quest data the conversions asked the server for (C_QuestLog.RequestLoadQuestByID) to arrive.
 local DATA_WAIT = 2
+-- What the addon gives a link when "Color links by difficulty" is off.
+local UNCOLORED = "ffffff00"
 
 local running = false
 
@@ -72,6 +74,31 @@ local function Readable(value)
 		return "<secret>"
 	end
 	return value
+end
+
+-- Forever's quest log colours a quest by C_PlayerInfo.GetContentDifficultyQuestForPlayer, which the client works out
+-- itself, while links take GetQuestDifficultyColor(level): only a real client can say whether the two agree.
+local function QuestLogDifficulty(questID)
+	if questID and C_PlayerInfo and C_PlayerInfo.GetContentDifficultyQuestForPlayer and GetDifficultyColor then
+		return C_PlayerInfo.GetContentDifficultyQuestForPlayer(questID)
+	end
+end
+
+local function DifficultyName(difficulty)
+	for name, value in pairs(Enum.RelativeContentDifficulty or {}) do
+		if value == difficulty then
+			return name
+		end
+	end
+	return tostring(difficulty)
+end
+
+local function ColorCode(color)
+	return ("ff%02x%02x%02x"):format(
+		math.floor(color.r * 255 + 0.5),
+		math.floor(color.g * 255 + 0.5),
+		math.floor(color.b * 255 + 0.5)
+	)
 end
 
 -- A SAY line, as the chat frame would filter it: CHAT_MSG_SAY because whisper addons such as WIM act on whispers.
@@ -151,6 +178,9 @@ local function Report(run)
 	if run.skipped then
 		print("  Lines not checked: " .. run.skipped .. ".")
 	end
+	if run.colorSkipped then
+		print("  Colours not checked: " .. run.colorSkipped .. ".")
+	end
 	for _, check in ipairs(run.checks) do
 		if not check.ok then
 			print(("  |cffff4040FAIL|r %s: got %s"):format(check.name, tostring(check.detail)))
@@ -170,10 +200,18 @@ local function Run()
 		addon = C_AddOns.GetAddOnMetadata("ClickableQuestLinks", "Version"),
 		build = build .. "." .. buildNumber,
 		locale = GetLocale(),
+		-- What the link colours depend on.
+		player = {
+			level = UnitLevel("player"),
+			effectiveLevel = UnitEffectiveLevel("player"),
+			trivialRange = UnitQuestTrivialLevelRange and UnitQuestTrivialLevelRange("player"),
+			questLogColors = C_CVar.GetCVarBool("showQuestDifficultyColor"),
+		},
 		databases = {},
 		checks = {},
 		links = {},
 		tooltips = {},
+		colors = {},
 		errors = {},
 	}
 	for _, name in ipairs(DATABASES) do
@@ -217,6 +255,9 @@ local function Run()
 		local text = Convert(case.message, 900000 + i)
 		run.links[case.message] = text
 		case.text = text
+		case.questID = type(text) == "string" and tonumber(text:match("|Hquest:(%d+):")) or nil
+		-- Asked again once the quest data is in: a different answer means the client needs that data for it.
+		case.difficultyBefore = QuestLogDifficulty(case.questID)
 		if not case.link then
 			check(case.message .. " stays text", text == case.message, text)
 		elseif exact or not case.plain then
@@ -234,6 +275,30 @@ local function Run()
 					check(case.message .. ": tooltip opens", shown, #lines .. " lines")
 					for _, want in ipairs(exact and case.lines or {}) do
 						check(case.message .. ": " .. want, HasLine(lines, want), table.concat(lines, " / "))
+					end
+					local linkColor = case.text:match("^|c(%x%x%x%x%x%x%x%x)|H")
+					local difficulty = QuestLogDifficulty(case.questID)
+					if difficulty == nil then
+						run.colorSkipped = "this client has no C_PlayerInfo.GetContentDifficultyQuestForPlayer"
+					elseif linkColor == UNCOLORED then
+						run.colorSkipped = "links are plain yellow, so Color links by difficulty is off"
+					else
+						local questLog = ColorCode(GetDifficultyColor(difficulty))
+						run.colors[case.message] = {
+							link = linkColor,
+							questLog = questLog,
+							difficulty = DifficultyName(difficulty),
+							before = case.difficultyBefore ~= nil and DifficultyName(case.difficultyBefore) or nil,
+						}
+						check(
+							case.message .. ": colour matches the quest log",
+							linkColor == questLog,
+							("link %s, quest log %s (%s)"):format(
+								tostring(linkColor),
+								questLog,
+								DifficultyName(difficulty)
+							)
+						)
 					end
 				end
 			end

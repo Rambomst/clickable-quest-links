@@ -680,9 +680,22 @@ scenario("the real DonData: the sender's name on the link, and its NPCs once the
 	sim:expectNoErrors(ADDON)
 end)
 
-scenario("the in-game self-test passes on the headless client with the real QuestieDB", function()
-	local sim, G = boot({ realQuestieDB = true, selfTest = true })
-	serveQuests(sim, {})
+-- Blizzard's QuestDifficultyColors as colour codes.
+local GREY, GREEN, YELLOW, ORANGE, RED = "ff808080", "ff40bf40", "ffffd100", "ffff8040", "ffff1a1a"
+
+-- The quest log's verdict on each self-test quest for a level 36 character, by the same level rules as
+-- GetQuestDifficultyColor with boot()'s trivial range of 8. The real client works this out itself.
+local QUEST_LOG_AT_36 = { [194] = "Fair", [1061] = "Trivial", [2] = "Easy", [68] = "Easy", [109] = "Trivial" }
+
+-- Boots with the self-test, runs /cqltest with questLog standing in for the client's quest log colours and known for
+-- the quest data the server sends, and returns the run and its failed checks, one per line.
+local function runSelfTest(opts, questLog, known)
+	opts.selfTest, opts.saved, opts.level = true, {}, 36
+	local sim, G = boot(opts)
+	serveQuests(sim, known or {})
+	sim.impl["C_PlayerInfo.GetContentDifficultyQuestForPlayer"] = function(questID)
+		return G.Enum.RelativeContentDifficulty[questLog[questID]]
+	end
 	G.SlashCmdList.CQLSELFTEST("")
 	sim:advance(2.5)
 	local db = G.ClickableQuestLinks_SelfTestDB
@@ -694,10 +707,36 @@ scenario("the in-game self-test passes on the headless client with the real Ques
 			failed[#failed + 1] = check.name .. ": " .. tostring(check.detail)
 		end
 	end
-	eq(table.concat(failed, "\n"), "", "failed checks")
+	return sim, run, table.concat(failed, "\n")
+end
+
+scenario("the in-game self-test passes on the headless client with the real QuestieDB", function()
+	local sim, run, failed = runSelfTest({ realQuestieDB = true }, QUEST_LOG_AT_36)
+	eq(failed, "", "failed checks")
 	eq(run.skipped, nil, "lines left unchecked")
-	-- 5 conversions and the text left alone, 5 tooltips with 3 lines each, no errors.
-	eq(run.total, 27, "checks run")
+	eq(run.colorSkipped, nil, "colours left unchecked")
+	-- 5 conversions and the text left alone, 5 tooltips with 3 lines and a colour each, no errors.
+	eq(run.total, 32, "checks run")
+	eq(run.player.effectiveLevel, 36, "recorded player level")
+	eq(run.colors["[[30] Sharptalon's Claw (2)]"].link, GREEN, "recorded link colour")
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("the in-game self-test fails a link coloured unlike the quest log", function()
+	-- No database: the four quests with a level in the text still convert, and their tooltips show the server's data.
+	local questLog = setmetatable({ [2] = "Trivial" }, { __index = QUEST_LOG_AT_36 })
+	local sim, run, failed = runSelfTest({ questieDB = false }, questLog, {
+		[194] = { title = "Raptor Mastery", text = "Kill 10 Stranglethorn Raptors." },
+		[2] = { title = "Sharptalon's Claw", text = "Bring Sharptalon's Claw to Senani Thunderheart." },
+		[68] = { title = "The Legend of Stalvan", text = "Take the Dusty Unsent Letter to Clerk Daltry." },
+		[109] = { title = "Report to Gryan Stoutmantle", text = "Talk to Gryan Stoutmantle." },
+	})
+	eq(
+		failed,
+		"[[30] Sharptalon's Claw (2)]: colour matches the quest log: link ff40bf40, quest log ff808080 (Trivial)",
+		"failed checks"
+	)
+	eq(run.colors["[[34] Raptor Mastery (194)]"].difficulty, "Fair", "recorded quest log verdict")
 	sim:expectNoErrors(ADDON)
 end)
 
@@ -779,9 +818,6 @@ scenario("closing the tooltip, then clicking the same quest, opens it", function
 	assert(G.ItemRefTooltip:IsShown(), "should open again after being closed")
 	sim:expectNoErrors(ADDON)
 end)
-
--- Blizzard's QuestDifficultyColors as colour codes.
-local GREY, GREEN, YELLOW, ORANGE, RED = "ff808080", "ff40bf40", "ffffd100", "ffff8040", "ffff1a1a"
 
 local function raptorIn(color)
 	return "|c" .. color .. "|Hquest:194:34|h[Raptor Mastery]|h|r"

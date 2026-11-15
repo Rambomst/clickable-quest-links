@@ -82,7 +82,10 @@ tested. Locally, with gh: `QUESTLINKS_DATABASES=latest tests/run.sh "the real "`
 `tests/ingame/ClickableQuestLinks_SelfTest` is a development-only addon (packages leave `tests/` out). Installed next
 to the addon, `/cqltest` sends the same quests through the client's own chat filters and quest tooltip, prints a
 summary and keeps the run in its saved variables. That covers what only the real client has: its zone names, its
-quest data and Blizzard's tooltip as it runs there. One scenario runs it on the headless client as well.
+quest data, Blizzard's tooltip as it runs there, and the colour its quest log gives each quest. Forever's quest log
+asks the client (`C_PlayerInfo.GetContentDifficultyQuestForPlayer`) while links follow the level rules of
+`GetQuestDifficultyColor`, so each link's colour is checked against the quest log's. Two scenarios run it on the
+headless client as well.
 
 The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat
 filter on forever_sim, and `tools/screenshots.py` draws the result with
