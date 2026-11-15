@@ -12,17 +12,24 @@ local ADDON_DIR = os.getenv("QUESTLINKS_ADDON_DIR") or (here .. "..")
 local FAKE_DB_DIR = here .. "fixtures/QuestieDB"
 -- The other quest databases the addon reads, as stand-ins with their APIs' shapes.
 local FAKE_SOURCES = { ding = "fixtures/Ding", polestar = "fixtures/Polestar", donData = "fixtures/DonData" }
--- The UiMap names the fixtures' spawns need, as the pinned Forever build names those maps.
+-- The UiMap names the fixtures' and the real databases' spawns need, as the pinned Forever build names those maps.
 local MAP_NAMES = {
 	[1411] = "Durotar",
 	[1413] = "The Barrens",
+	[1431] = "Duskwood",
 	[1434] = "Stranglethorn Vale",
+	[1436] = "Westfall",
 	[1440] = "Ashenvale",
 	[1454] = "Orgrimmar",
 }
 
--- The released QuestieDB, which keeps its data in TOC metadata that C_EncodingUtil decodes.
-local REAL_QUESTIEDB = assert(os.getenv("REAL_QUESTIEDB"), "REAL_QUESTIEDB is not set: run tests/run.sh")
+-- The released databases, pinned and fetched by tests/run.sh. QuestieDB keeps its data in TOC metadata that
+-- C_EncodingUtil decodes; REAL_POLESTAR holds Polestar and its load-on-demand Polestar_QuestDB.
+local function real(name)
+	return assert(os.getenv(name), name .. " is not set: run tests/run.sh")
+end
+local REAL_QUESTIEDB, REAL_DING = real("REAL_QUESTIEDB"), real("REAL_DING")
+local REAL_DONDATA, REAL_POLESTAR = real("REAL_DONDATA"), real("REAL_POLESTAR")
 -- The sim has no AreaTable, the client's source of zone names; these are the pinned Forever build's names for the
 -- area IDs the real QuestieDB gives the quests below.
 local AREA_NAMES = {
@@ -45,7 +52,8 @@ local RAPTOR = "|cffffff00|Hquest:194:34|h[Raptor Mastery]|h|r"
 -- the addon loads under), opts.saved (saved variables; by default difficulty colours are off, so converted links are
 -- plain yellow), opts.level (the player's level; the sim's is 60), opts.ding, opts.polestar and opts.donData (load
 -- that database's stand-in), opts.polestarUnloaded (Polestar's reads fail, as before its data loads),
--- opts.realQuestieDB (the released QuestieDB instead of the fake one).
+-- opts.realQuestieDB (the released QuestieDB instead of the fake one), opts.realDing, opts.realDonData and
+-- opts.realPolestar (that released addon).
 local function boot(opts)
 	opts = opts or {}
 	local sim = Sim.new({ cache = CACHE })
@@ -79,6 +87,16 @@ local function boot(opts)
 		if opts[option] then
 			sim:addon(here .. dir)
 		end
+	end
+	if opts.realDing then
+		sim:addon(REAL_DING)
+	end
+	if opts.realDonData then
+		sim:addon(REAL_DONDATA)
+	end
+	if opts.realPolestar then
+		sim:addon(REAL_POLESTAR .. "/Polestar")
+		sim:addon(REAL_POLESTAR .. "/Polestar_QuestDB")
 	end
 	if opts.polestarUnloaded then
 		sim.G.FAKE_POLESTAR_UNLOADED = true
@@ -168,10 +186,22 @@ local function hasLine(lines, text)
 	return false
 end
 
--- Quest tooltip data for the quests the client has; others get nil, as for a quest the client never loaded.
-local function serveQuests(sim, known)
+local function expectLines(lines, wanted)
+	for _, text in ipairs(wanted) do
+		assert(hasLine(lines, text), text .. " missing:\n" .. table.concat(lines, "\n"))
+	end
+end
+
+-- Quest tooltip data for the quests the client has, and creature tooltips (a unit link's first line is the name)
+-- for the NPCs it has; others get nil, as for a quest or creature the client never loaded.
+local function serveQuests(sim, known, creatures)
 	local G = sim.G
 	sim.impl["C_TooltipInfo.GetHyperlink"] = function(link)
+		local npc = tonumber(tostring(link):match("^unit:Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)"))
+		if npc then
+			local name = creatures and creatures[npc]
+			return name and { type = G.Enum.TooltipDataType.Unit, lines = { { leftText = name } } } or nil
+		end
 		local id = tonumber(tostring(link):match("^quest:(%d+)"))
 		local quest = id and known[id]
 		if not quest then
@@ -472,7 +502,9 @@ end)
 scenario("DonData names a starter and a finisher, with the link's level", function()
 	local sim, G = boot({ questieDB = false, donData = true })
 	serveQuests(sim, {})
-	click(G, filtered(sim, "[[14] Supplies for the Crossroads (4001)]"))
+	local link = filtered(sim, "[[14] Supplies for the Crossroads (4001)]")
+	eq(link, "|cffffff00|Hquest:4001:14|h[Supplies for the Crossroads]|h|r", "the sender's name, not DonData's")
+	click(G, link)
 	local lines = tooltipLines(G)
 	eq(lines[1], "Supplies for the Crossroads", "title")
 	assert(hasLine(lines, "Level:|r 14 (requires 12)"), "level line:\n" .. table.concat(lines, "\n"))
@@ -480,17 +512,33 @@ scenario("DonData names a starter and a finisher, with the link's level", functi
 	assert(hasLine(lines, "Ends:|r Quartermaster (The Barrens)"), "end line")
 	click(G, filtered(sim, "[Word to the Wise (4002)]"))
 	lines = tooltipLines(G)
+	eq(lines[1], "Word to the Wise", "the client's title")
 	assert(hasLine(lines, "Ends:|r Distant Elder"), "end line:\n" .. table.concat(lines, "\n"))
 	assert(not hasLine(lines, "Distant Elder ("), "a guessed turn-in map")
+	assert(not hasLine(lines, "Starts:"), "a giver nobody has named")
 	assert(not hasLine(lines, "Level:"), "a level with none on the link or in DonData")
 	sim:expectNoErrors(ADDON)
 end)
 
-local function expectLines(lines, wanted)
-	for _, text in ipairs(wanted) do
-		assert(hasLine(lines, text), text .. " missing:\n" .. table.concat(lines, "\n"))
-	end
-end
+scenario("DonData's display names match plain links but never reach the link text", function()
+	local sim, G = boot({ questieDB = false, donData = true })
+	serveQuests(sim, {}, { [507] = "Sergeant Bloodtusk" })
+	eq(
+		filtered(sim, "[Supplies for the Crossroads (4001)]"),
+		"|cffffff00|Hquest:4001:-1|h[Supplies for the Crossroads]|h|r",
+		"without the part number"
+	)
+	eq(filtered(sim, "[Barrens Patrol (4003)]"), "|cffffff00|Hquest:4003:-1|h[Barrens Patrol]|h|r", "one of two names")
+	eq(filtered(sim, "[Supply Run (4001)]"), "[Supply Run (4001)]", "another name")
+	click(G, filtered(sim, "[[15] Barrens Patrol (4003)]"))
+	local lines = tooltipLines(G)
+	eq(lines[1], "Barrens Patrol", "title from the link")
+	expectLines(lines, {
+		"Starts:|r Patrol Leader (The Barrens)",
+		"Ends:|r Sergeant Bloodtusk (The Barrens)",
+	})
+	sim:expectNoErrors(ADDON)
+end)
 
 -- The expected names, levels and zone IDs below were read from QuestieDB 1.1.1's data directly (LibQuestieDB.Quest,
 -- Npc, Object and Item), not through the addon.
@@ -553,6 +601,71 @@ scenario("the real QuestieDB: six starters end in a count", function()
 		"Starts:|r Farmer Saldean (Westfall), Farmer Furlbrow (Westfall) and 4 more",
 		"Ends:|r Gryan Stoutmantle (Westfall)",
 	})
+	sim:expectNoErrors(ADDON)
+end)
+
+-- The same quests from the other released databases, each on its own, with what each one knows.
+scenario("the real Ding!: the same lines from its own database, zones from its map spawns", function()
+	local sim, G = boot({ questieDB = false, realDing = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[34] Raptor Mastery (194)]"))
+	expectLines(tooltipLines(G), {
+		"Level:|r 34 (requires 28)",
+		"Starts:|r Hemet Nesingwary (Stranglethorn Vale)",
+		"Ends:|r Hemet Nesingwary (Stranglethorn Vale)",
+	})
+	click(G, filtered(sim, "[The Spirits of Stonetalon (1061)]"))
+	expectLines(tooltipLines(G), {
+		"Level:|r 17 (requires 13)",
+		"Starts:|r Zor Lonetree (Orgrimmar)",
+		"Ends:|r Seereth Stonebreak (The Barrens)",
+	})
+	click(G, filtered(sim, "[[28] The Legend of Stalvan (68)]"))
+	expectLines(tooltipLines(G), { "Starts:|r Old Footlocker (Westfall)", "Ends:|r Clerk Daltry (Duskwood)" })
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("the real Polestar: the same lines once its quest database loads", function()
+	local sim, G = boot({ questieDB = false, realPolestar = true })
+	serveQuests(sim, {})
+	click(G, filtered(sim, "[[30] Sharptalon's Claw (2)]"))
+	expectLines(tooltipLines(G), {
+		"Level:|r 30 (requires 20)",
+		"Starts:|r Sharptalon's Claw (item)",
+		"Ends:|r Senani Thunderheart (Ashenvale)",
+	})
+	click(G, filtered(sim, "[[10] Report to Gryan Stoutmantle (109)]"))
+	expectLines(tooltipLines(G), {
+		"Level:|r 10 (requires 9)",
+		"Starts:|r Farmer Saldean (Westfall), Farmer Furlbrow (Westfall) and 4 more",
+		"Ends:|r Gryan Stoutmantle (Westfall)",
+	})
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("the real DonData: the sender's name on the link, and its NPCs once the client knows them", function()
+	local sim, G = boot({ questieDB = false, realDonData = true })
+	serveQuests(sim, {}, { [715] = "Hemet Nesingwary", [267] = "Clerk Daltry" })
+	eq(filtered(sim, "[[34] Raptor Mastery (194)]"), RAPTOR, "level form")
+	-- DonData calls 194 "Raptor Hunting [CATA+] / Raptor Mastery (1/4)" and 68 "The Legend of Stalvan (3/13)".
+	eq(filtered(sim, "[Raptor Mastery (194)]"), "|cffffff00|Hquest:194:-1|h[Raptor Mastery]|h|r", "plain form")
+	eq(
+		filtered(sim, "[The Legend of Stalvan (68)]"),
+		"|cffffff00|Hquest:68:-1|h[The Legend of Stalvan]|h|r",
+		"plain form of a chain's quest"
+	)
+	click(G, RAPTOR)
+	local lines = tooltipLines(G)
+	eq(lines[1], "Raptor Mastery", "title")
+	expectLines(lines, {
+		"Level:|r 34 (requires 28)",
+		"Starts:|r Hemet Nesingwary (Stranglethorn Vale)",
+		"Ends:|r Hemet Nesingwary (Stranglethorn Vale)",
+	})
+	click(G, filtered(sim, "[[28] The Legend of Stalvan (68)]"))
+	lines = tooltipLines(G)
+	expectLines(lines, { "Level:|r 28 (requires 22)", "Ends:|r Clerk Daltry (Duskwood)" })
+	assert(not hasLine(lines, "Starts:"), "DonData has no starter for a quest an object starts")
 	sim:expectNoErrors(ADDON)
 end)
 

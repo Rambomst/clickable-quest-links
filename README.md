@@ -41,7 +41,7 @@ list that knows the quest is used:
 | [QuestieDB](https://www.curseforge.com/wow/addons/questiedb) | level, required level, who starts and ends the quest, with their zone |
 | [Ding!](https://www.curseforge.com/wow/addons/ding-xp-and-leveling-guide) (its DingDB) | the same, and English quest names, so `[Name (id)]` from an English client converts on any client |
 | [Polestar Guides](https://www.curseforge.com/wow/addons/polestar) | the same, while one of Polestar's quest features is on (its quest data loads only then) |
-| [DonData](https://www.curseforge.com/wow/addons/dondata) (with Questdon or Leveldon) | the required level and one starter and finisher; the level comes from the link |
+| [DonData](https://www.curseforge.com/wow/addons/dondata) (with Questdon or Leveldon) | the required level, and a starter and a finisher once the game or DonData's records know their names; the level comes from the link |
 
 With none of them, links still convert and open Blizzard's own quest tooltip.
 
@@ -68,11 +68,12 @@ tests/run.sh
 `FOREVER_SIM_REPO` points the tests at a clone somewhere else. CI runs them on every push, pinned to the commit in
 `.github/workflows/ci.yml`.
 
-Most scenarios use small stand-ins for the quest databases; the "real QuestieDB" ones read the released QuestieDB.
-`tests/run.sh` downloads the pinned release into the sim's cache on the first run and checks it against its SHA-256;
-`REAL_QUESTIEDB` points those scenarios at another copy. QuestieDB keeps its data base64, zlib and CBOR encoded in TOC
-metadata and decodes it with `C_EncodingUtil`, which forever_sim generates from Blizzard's documentation without
-implementing, so `tests/encodingutil.lua` implements it for the sim (`tests/encodingutil_test.lua` checks it).
+Most scenarios use small stand-ins for the quest databases; the "real" ones read the released QuestieDB, Ding!,
+Polestar and DonData. `tests/run.sh` downloads the pinned releases into the sim's cache on the first run and checks
+them against their SHA-256; `REAL_QUESTIEDB`, `REAL_DING`, `REAL_DONDATA` and `REAL_POLESTAR` point those scenarios
+at other copies. QuestieDB keeps its data base64, zlib and CBOR encoded in TOC metadata and decodes it with
+`C_EncodingUtil`, which forever_sim generates from Blizzard's documentation without implementing, so
+`tests/encodingutil.lua` implements it for the sim (`tests/encodingutil_test.lua` checks it).
 
 The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat
 filter on forever_sim, and `tools/screenshots.py` draws the result with

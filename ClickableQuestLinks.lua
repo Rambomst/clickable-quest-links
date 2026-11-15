@@ -164,11 +164,12 @@ local options = DEFAULTS -- the saved settings, once Start has loaded them
 -- Quest databases, best first. The first one that knows a quest answers for it, so whichever one a player runs is
 -- used. Each is checked once, on first use, and left out when its addon is missing or offers another interface.
 --
--- Quest(handle, questID) returns nil or { name, englishName, level, requiredLevel, record }; chat links need only
--- that. For a tooltip, Starts and Ends(handle, questID, info) list the quest's starters and finishers, each
--- { kind, id } (kind "npc", "object" or "item") or text, with `total` when there are more than listed, and
--- Place(handle, kind, id) names one: "Name (Zone)", or the item's name. A guarded source is read through pcall: it
--- is another addon's internals, which may change or not have loaded yet.
+-- Quest(handle, questID) returns nil or { name, englishName, names, level, requiredLevel, record }; chat links need
+-- only that. `name` is the quest's own title, which a converted link may show; `names` are other spellings that only
+-- count as a match for a plain link. For a tooltip, Starts and Ends(handle, questID, info) list the quest's starters
+-- and finishers, each { kind, id } (kind "npc", "object" or "item") or text, with `total` when there are more than
+-- listed, and Place(handle, kind, id) names one: "Name (Zone)", or the item's name. A guarded source is read through
+-- pcall: it is another addon's internals, which may change or not have loaded yet.
 
 local KINDS = { "npc", "object", "item" }
 
@@ -216,6 +217,45 @@ end
 
 local function ItemText(name)
 	return type(name) == "string" and L.ITEM:format(name) or nil
+end
+
+-- The spellings in an All The Things display name, as DonData keeps quest names: "Raptor Hunting [CATA+] / Raptor
+-- Mastery (1/4)" gives "Raptor Mastery", then "Raptor Hunting". Tags and part numbers go; a trailing note such as
+-- "(Horde)" is tried with and without; a name marked for a later expansion comes last.
+local function NameVariants(name)
+	local first, later = {}, {}
+	if type(name) ~= "string" then
+		return first
+	end
+	for part in (name .. " / "):gmatch("(.-) / ") do
+		local list = part:find("%[%u+%+%]") and later or first
+		local bare = part:gsub("%s*%b[]", ""):gsub("%s*%(%d+/%d+%)", ""):match("^%s*(.-)%s*$")
+		if bare ~= "" then
+			list[#list + 1] = bare
+			local short = bare:gsub("%s*%b()$", "")
+			if short ~= bare and short ~= "" then
+				list[#list + 1] = short
+			end
+		end
+	end
+	for _, variant in ipairs(later) do
+		first[#first + 1] = variant
+	end
+	return first
+end
+
+-- A creature's name as the client has it, from its tooltip, or nil until the client has asked the server for it
+-- (a later click then has it). DonData names NPCs the same way.
+local function ClientCreatureName(creatureID)
+	local data = C_TooltipInfo.GetHyperlink(("unit:Creature-0-0-0-0-%d-0000000000"):format(creatureID))
+	local line = data and data.lines and data.lines[1]
+	local name = line and line.leftText
+	if canaccessvalue and not canaccessvalue(name) then
+		return nil
+	end
+	if type(name) == "string" and name ~= "" and not name:find("^Creature%-") then
+		return name
+	end
 end
 
 local QUESTIEDB_CONTRACT = 4
@@ -363,32 +403,48 @@ local SOURCES = {
 		end,
 		Quest = function(api, questID)
 			local quest = api.GetQuest(questID)
-			if type(quest) ~= "table" then
+			if type(quest) ~= "table" or type(quest.name) ~= "string" then
 				return nil
 			end
-			local name = api.QuestTitle(questID) or quest.name
-			if type(name) ~= "string" or name == "" then
-				return nil
-			end
-			return { name = name, requiredLevel = tonumber(quest.minLevel), record = quest }
+			-- quest.name is All The Things' display name (NameVariants). QuestTitle gives the client's or a
+			-- recorded title when DonData has one, else that same display name, which a link must not show.
+			local title = api.QuestTitle(questID)
+			return {
+				name = type(title) == "string" and title ~= quest.name and title or nil,
+				names = NameVariants(quest.name),
+				requiredLevel = tonumber(quest.minLevel),
+				record = quest,
+			}
 		end,
 		Starts = function(api, questID, info)
-			local starts = {}
+			local starts, givers = {}, info.record.givers
 			local map, _, _, giver = api.QuestStart(questID)
 			if type(giver) == "string" then
+				-- Recorded when this player took the quest, with where they took it.
 				starts[1] = WithZone(giver, MapName(map))
+			elseif type(givers) == "table" and givers[1] then
+				-- DonData's own creature names cover few quest givers. The quest's map is its one giver's; with
+				-- several it may belong to another, so it is left out.
+				local name = (api.CreatureName and api.CreatureName(givers[1])) or ClientCreatureName(givers[1])
+				if type(name) == "string" then
+					starts[1] = WithZone(name, #givers == 1 and MapName(map) or nil)
+				end
 			end
-			starts.total = type(info.record.givers) == "table" and #info.record.givers or 0
+			starts.total = type(givers) == "table" and #givers or 0
 			return starts
 		end,
 		Ends = function(api, questID)
-			local _, finisher = api.TurnInNpc(questID)
+			local npc, finisher = api.TurnInNpc(questID)
+			if type(finisher) ~= "string" and npc then
+				finisher = ClientCreatureName(npc)
+			end
 			if type(finisher) ~= "string" then
 				return {}
 			end
 			-- Leaves out the map where DonData only guesses the turn-in: the giver's, or the next quest's giver's.
+			-- "shared" (two or more other players reported it) is a source its API comment does not list.
 			local map, _, _, from = api.TurnInPoint(questID)
-			local known = from == "data" or from == "blizzard" or from == "learned"
+			local known = from == "data" or from == "blizzard" or from == "learned" or from == "shared"
 			return { WithZone(finisher, known and MapName(map) or nil) }
 		end,
 		Place = function()
@@ -433,6 +489,22 @@ local function SameName(a, b)
 	return type(a) == "string" and type(b) == "string" and a:lower() == b:lower()
 end
 
+local function KnownName(info, name)
+	if SameName(name, info.name) or SameName(name, info.englishName) then
+		return true
+	end
+	for _, variant in ipairs(info.names or {}) do
+		if SameName(name, variant) then
+			return true
+		end
+	end
+	return false
+end
+
+-- The name each quest's last converted link showed, for its tooltip when neither the client nor the database has a
+-- title to show.
+local linkNames = {}
+
 local function ClientTitle(questID)
 	local title = C_QuestLog.GetTitleForQuestID(questID)
 	if type(title) == "string" and title ~= "" then
@@ -463,12 +535,8 @@ local function QuestLink(id, sentName, sentLevel)
 	end
 	local info = QuestInfo(questID)
 	local title = ClientTitle(questID)
-	if not sentLevel then
-		local known = SameName(sentName, title)
-			or (info and (SameName(sentName, info.name) or SameName(sentName, info.englishName)))
-		if not known then
-			return nil
-		end
+	if not sentLevel and not (SameName(sentName, title) or (info and KnownName(info, sentName))) then
+		return nil
 	end
 	if not title and not requested[questID] then
 		-- Fetches the quest now so its tooltip has the quest text by the time the link is clicked.
@@ -477,6 +545,7 @@ local function QuestLink(id, sentName, sentLevel)
 	end
 	local level = (info and info.level) or tonumber(sentLevel and sentLevel:match("^%-?%d+")) or -1
 	local name = title or (info and info.name) or sentName -- the client's title is in the player's language
+	linkNames[questID] = name
 	return QUEST_LINK:format(LinkColor(level), questID, level, name)
 end
 
@@ -612,8 +681,9 @@ local function AddQuestInfo(tooltip, questID, linkLevel)
 	if not info then
 		return false
 	end
-	if tooltip:NumLines() == 0 then
-		tooltip:AddLine(info.name, 1, 1, 1)
+	local title = info.name or linkNames[questID] or (info.names and info.names[1])
+	if tooltip:NumLines() == 0 and title then
+		tooltip:AddLine(title, 1, 1, 1)
 	end
 	tooltip:AddLine(" ")
 	local level, required = info.level or linkLevel, info.requiredLevel
