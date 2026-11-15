@@ -20,6 +20,12 @@ This addon turns that text into the game's own quest link:
   red. To keep links yellow, turn off "Color links by difficulty" in Options, AddOns, Clickable Quest Links (`/cql`
   opens it).
 
+## Install
+
+Install it from [CurseForge](https://www.curseforge.com/wow/addons/clickable-quest-links), by hand or with an addon
+manager, or extract the zip from the newest [release](https://github.com/Rambomst/clickable-quest-links/releases)
+into `World of Warcraft/_forever_/Interface/AddOns`.
+
 ## What gets converted
 
 - `[[34] Raptor Mastery (194)]`, which Questie sends when it shows quest levels. Always converted, even for a quest
@@ -48,12 +54,28 @@ With none of them, links still convert and open Blizzard's own quest tooltip.
 RestedXP has no quest data to read: its Forever files map quests to items, and quest and NPC names appear only in
 guide text.
 
-## Translations
+## Bugs, ideas and translations
 
-The tooltip labels are translated for every client language at the top of `ClickableQuestLinks.lua`. Corrections
-from native speakers are welcome as an issue or a pull request.
+Report bugs and ideas as an [issue](https://github.com/Rambomst/clickable-quest-links/issues). The tooltip labels are
+translated for every client language at the top of `ClickableQuestLinks.lua`; corrections from native speakers are
+welcome as an issue or a pull request.
 
 ## Development
+
+Everything the addon runs is in `ClickableQuestLinks.lua`:
+
+- `Rewrite` and `Filter`: the chat filter that turns Questie's text into links.
+- `OnInsertLink`: what goes in the chat box when a quest link is shift-clicked.
+- `AddQuestInfo`: the tooltip lines a quest database adds.
+- `LinkColor`: a converted link's colour.
+- `SOURCES`: the quest databases, best first; the comment above it says what each entry provides. A new database
+  needs an entry there, a stand-in with its API's shape in `tests/fixtures`, and scenarios in
+  `tests/questlinks_test.lua`, as the other four have.
+- `TRANSLATIONS`: the tooltip labels and the option's text in each client language.
+
+Lua is formatted with [StyLua](https://github.com/JohnnyMorganz/StyLua): run `stylua .`, which reads `.stylua.toml`.
+
+### Tests
 
 The tests run the addon on forever_sim, the headless Forever client in
 [SkillUp Forever's repository](https://github.com/cjber/skillup-forever), against Blizzard's real chat and tooltip
@@ -65,43 +87,32 @@ git clone https://github.com/cjber/skillup-forever ../skillup-forever
 tests/run.sh
 ```
 
-`FOREVER_SIM_REPO` points the tests at a clone somewhere else. CI runs them on every push, pinned to the commit in
-`.github/workflows/ci.yml`.
+- `tests/run.sh "shift-click"` runs only the scenarios whose names contain that text.
+- `FOREVER_SIM_REPO` points the tests at a clone somewhere else. CI tests against the commit in
+  `.github/workflows/ci.yml` (`FOREVER_SIM_COMMIT`); if a newer one fails, check that one out.
+- Most scenarios use small stand-ins for the quest databases. The "real" ones read released QuestieDB, Ding!,
+  Polestar and DonData builds, pinned in `tests/run.sh` and downloaded on the first run.
+  `QUESTLINKS_DATABASES=latest` takes each one's newest release instead (needs the GitHub CLI), and
+  `REAL_QUESTIEDB`, `REAL_DING`, `REAL_POLESTAR` and `REAL_DONDATA` point at copies of your own.
 
-Most scenarios use small stand-ins for the quest databases; the "real" ones read the released QuestieDB, Ding!,
-Polestar and DonData. `tests/run.sh` downloads the pinned releases into the sim's cache on the first run and checks
-them against their SHA-256; `REAL_QUESTIEDB`, `REAL_DING`, `REAL_DONDATA` and `REAL_POLESTAR` point those scenarios
-at other copies. QuestieDB keeps its data base64, zlib and CBOR encoded in TOC metadata and decodes it with
-`C_EncodingUtil`, which forever_sim generates from Blizzard's documentation without implementing, so
-`tests/encodingutil.lua` implements it for the sim (`tests/encodingutil_test.lua` checks it).
+CI runs the tests on every push and pull request.
 
-Every Monday, `.github/workflows/drift.yml` runs the "real" scenarios against the newest release of each database
-instead of the pinned one, so a change in one of them fails there first; the run's summary lists the releases it
-tested. Locally, with gh: `QUESTLINKS_DATABASES=latest tests/run.sh "the real "`.
+### In game
 
-`tests/ingame/ClickableQuestLinks_SelfTest` is a development-only addon (packages leave `tests/` out). Installed next
-to the addon, `/cqltest` sends the same quests through the client's own chat filters and quest tooltip, prints a
-summary and keeps the run in its saved variables. That covers what only the real client has: its zone names, its
-quest data, Blizzard's tooltip as it runs there, and the colour its quest log gives each quest, which only the client
-works out (`C_PlayerInfo.GetContentDifficultyQuestForPlayer`). Each link's colour is checked against it, and a probe of
-quests the client has never loaded records whether that answer needs the quest's data. Scenarios run it on the
-headless client as well, with the real QuestieDB and with each of the other real databases alone, as the in-game
-rounds do with one database enabled.
+Some things only the real client has: its zone names, its quest data and the colour its quest log gives a quest.
+`tests/ingame/ClickableQuestLinks_SelfTest` is a development-only addon that checks those:
 
-The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat
-filter on forever_sim, and `tools/screenshots.py` draws the result with
-[forever-core](https://github.com/cjber/forever-core)'s wowmock, in the client's chat font and class colours. They
-need Pillow and a forever-core clone next to this repository (`FOREVER_CORE` points elsewhere):
+1. Copy or link this repository into `Interface/AddOns` as `ClickableQuestLinks` (the folder name has to match the
+   TOC's), and `tests/ingame/ClickableQuestLinks_SelfTest` next to it. Disable Questie: with it loaded, this addon
+   stays out of the way. Restart the game, which only looks for new addon folders at startup.
+2. Type `/cqltest`. It sends the test quests through the client's chat filters, opens their tooltips, and prints how
+   many checks passed and which failed. The expected tooltip lines are an English client's; on other languages it
+   says what it left out.
+3. With more than one quest database installed, `/cqltest rounds` runs it once with each of them enabled alone,
+   reloading between rounds (click Reload UI when it asks), and then puts your AddOns list back. `/cqltest stop`
+   ends the rounds early.
 
-```bash
-git clone https://github.com/cjber/forever-core ../forever-core
-python3 tools/screenshots.py
-```
-
-The tooltip screenshots are in-game captures.
-
-Pushing a `v*` tag runs the tests, then BigWigsMods/packager builds the zip and publishes it to GitHub Releases,
-CurseForge and, when configured, Wago.
+Each run is also kept in the self-test's saved variables, which the game writes at the next `/reload`.
 
 ## License
 

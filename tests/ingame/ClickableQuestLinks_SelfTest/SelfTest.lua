@@ -1,9 +1,9 @@
--- In-game self-test for Clickable Quest Links, for development only: tests/ is not packaged, and
--- ~/scripts/~scratch/wow-forever-quest-links/install.sh installs this next to the dev copy. /cqltest sends the quests
--- the headless "real" scenarios use through this client's own chat filters and ItemRefTooltip, prints a summary and
--- keeps the run in ClickableQuestLinks_SelfTestDB, which the client writes to disk at /reload or logout. What only
--- the real client has gets checked here: its zone names, its quest data, Blizzard's tooltip as it really runs, and
--- the colour its quest log gives each quest. tests/questlinks_test.lua runs this file on the headless client too.
+-- In-game self-test for Clickable Quest Links, for development only: tests/ is not packaged. Installed next to the
+-- addon (README, "In game"), /cqltest sends the quests the headless "real" scenarios use through this client's own
+-- chat filters and ItemRefTooltip, prints a summary and keeps the run in ClickableQuestLinks_SelfTestDB, which the
+-- client writes to disk at /reload or logout. What only the real client has gets checked here: its zone names, its
+-- quest data, Blizzard's tooltip as it really runs, and the colour its quest log gives each quest.
+-- tests/questlinks_test.lua runs this file on the headless client too.
 
 -- What an English client shows when QuestieDB, Ding! or Polestar answers (the headless scenarios expect the same).
 -- Links are matched without their colour, which follows the player's level and is checked against the quest log's.
