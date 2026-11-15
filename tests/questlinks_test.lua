@@ -773,6 +773,66 @@ for _, database in ipairs({
 	end)
 end
 
+scenario("the in-game self-test's rounds run each installed database alone, then put the AddOns list back", function()
+	-- The character's enable states for the databases' addons, kept by the client across reloads.
+	local states = { QuestieDB = true, Ding = true, DonData = true }
+	local reloads = 0
+	local function client(sim)
+		sim.impl["C_AddOns.DoesAddOnExist"] = function(name)
+			return states[name] ~= nil
+		end
+		sim.impl["C_AddOns.GetAddOnEnableState"] = function(name)
+			return states[name] and 2 or 0
+		end
+		sim.impl["C_AddOns.EnableAddOn"] = function(name)
+			states[name] = true
+		end
+		sim.impl["C_AddOns.DisableAddOn"] = function(name)
+			states[name] = false
+		end
+		sim.impl["C_UI.Reload"] = function()
+			reloads = reloads + 1
+		end
+	end
+	local function enabled()
+		local names = {}
+		for name, on in pairs(states) do
+			if on then
+				names[#names + 1] = name
+			end
+		end
+		table.sort(names)
+		return table.concat(names, " ")
+	end
+
+	local sim, G = boot({ ding = true, donData = true, selfTest = true, saved = {} })
+	client(sim)
+	G.SlashCmdList.CQLSELFTEST("rounds")
+	sim:advance(1)
+	eq(enabled(), "QuestieDB", "the first round's database")
+	eq(reloads, 1, "reloads")
+	local saved = G.ClickableQuestLinks_SelfTestDB
+	-- After each reload the client starts again with the round's database alone and the saved plan.
+	for i, round in ipairs({
+		{ "QuestieDB", {}, "Ding" },
+		{ "Ding", { questieDB = false, ding = true }, "DonData" },
+		{ "DonData", { questieDB = false, donData = true }, "Ding DonData QuestieDB" },
+	}) do
+		local database, opts, after = round[1], round[2], round[3]
+		opts.selfTest, opts.saved = true, { ClickableQuestLinks_SelfTestDB = saved }
+		sim, G = boot(opts)
+		client(sim)
+		sim:advance(20)
+		saved = G.ClickableQuestLinks_SelfTestDB
+		eq(saved.runs[1].round, database, "round " .. i)
+		eq(saved.runs[1].answering, database, "answering in round " .. i)
+		eq(enabled(), after, "enabled after round " .. i)
+		eq(reloads, i + 1, "reloads after round " .. i)
+		sim:expectNoErrors(ADDON)
+	end
+	eq(saved.rounds, nil, "the plan once done")
+end)
+
 scenario("the in-game self-test fails a link coloured unlike the quest log", function()
 	-- No database: the four quests with a level in the text still convert, and their tooltips show the server's data.
 	local questLog = setmetatable({ [2] = "Trivial" }, { __index = QUEST_LOG_AT_36 })

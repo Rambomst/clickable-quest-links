@@ -247,7 +247,7 @@ local function Report(run)
 	end
 end
 
-local function Run()
+local function Run(onDone)
 	if running then
 		print("Clickable Quest Links self-test: already running.")
 		return
@@ -314,6 +314,9 @@ local function Run()
 		check("no Lua errors during the run", #run.errors == 0, run.errors[1])
 		Report(run)
 		running = false
+		if onDone then
+			onDone(run)
+		end
 	end
 
 	for i, case in ipairs(CASES) do
@@ -377,5 +380,122 @@ local function Run()
 	end)
 end
 
+-- Rounds: one run per database with only that one enabled, because the addon asks QuestieDB first and the others
+-- answer only without it. A round sets the databases' enable states for this character, reloads, and runs once the
+-- character is back in the world; after the last, the states go back as they were. Between reloads the plan lives in
+-- ClickableQuestLinks_SelfTestDB.rounds, so a queue written there while the game is closed
+-- (rounds = { queue = { "Ding", "DonData" } }) starts at the next login.
+local DATABASE_ADDONS = { "QuestieDB", "Ding", "Polestar", "Polestar_QuestDB", "DonData" }
+local ROUND_ADDONS = {
+	QuestieDB = { QuestieDB = true },
+	Ding = { Ding = true },
+	Polestar = { Polestar = true, Polestar_QuestDB = true },
+	DonData = { DonData = true },
+}
+local SETTLE = 5 -- seconds after login before a round runs, for the other addons to finish setting up
+local POLESTAR_WAIT = 30 -- longest wait for Polestar to load its quest data after login
+
+local function Say(message)
+	print("|cff3fa9f5Clickable Quest Links self-test:|r " .. message)
+end
+
+local function SetDatabaseAddOns(character, enabled)
+	for _, name in ipairs(DATABASE_ADDONS) do
+		if C_AddOns.DoesAddOnExist(name) then
+			if enabled[name] then
+				C_AddOns.EnableAddOn(name, character)
+			else
+				C_AddOns.DisableAddOn(name, character)
+			end
+		end
+	end
+end
+
+local function Reload(message)
+	Say(message .. " Reloading; if nothing happens, /reload.")
+	C_Timer.After(1, ReloadUI)
+end
+
+local function StartRounds(queue)
+	if not queue[1] then
+		Say("no quest database is installed.")
+		return
+	end
+	local rounds = { queue = queue, character = UnitName("player"), restore = {} }
+	for _, name in ipairs(DATABASE_ADDONS) do
+		if C_AddOns.DoesAddOnExist(name) then
+			rounds.restore[name] = C_AddOns.GetAddOnEnableState(name, rounds.character) > 0
+		end
+	end
+	ClickableQuestLinks_SelfTestDB = ClickableQuestLinks_SelfTestDB or {}
+	ClickableQuestLinks_SelfTestDB.rounds = rounds
+	SetDatabaseAddOns(rounds.character, ROUND_ADDONS[queue[1]] or {})
+	Reload(("%d rounds, first %s alone."):format(#queue, queue[1]))
+end
+
+local function ContinueRounds(rounds)
+	local database = rounds.queue[1]
+	local waited = 0
+	local function go()
+		if database == "Polestar" and not C_AddOns.IsAddOnLoaded("Polestar_QuestDB") and waited < POLESTAR_WAIT then
+			waited = waited + 1
+			C_Timer.After(1, go)
+			return
+		end
+		Run(function(run)
+			run.round = database
+			table.remove(rounds.queue, 1)
+			if rounds.queue[1] then
+				SetDatabaseAddOns(rounds.character, ROUND_ADDONS[rounds.queue[1]] or {})
+				Reload(("next, %s alone."):format(rounds.queue[1]))
+			else
+				SetDatabaseAddOns(rounds.character, rounds.restore)
+				ClickableQuestLinks_SelfTestDB.rounds = nil
+				Reload("rounds done, the AddOns list is back as it was.")
+			end
+		end)
+	end
+	go()
+end
+
+local login = CreateFrame("Frame")
+login:RegisterEvent("PLAYER_ENTERING_WORLD")
+login:SetScript("OnEvent", function(self)
+	self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+	local rounds = ClickableQuestLinks_SelfTestDB and ClickableQuestLinks_SelfTestDB.rounds
+	if type(rounds) ~= "table" or type(rounds.queue) ~= "table" or not rounds.queue[1] then
+		return
+	end
+	C_Timer.After(SETTLE, function()
+		if rounds.restore then
+			ContinueRounds(rounds)
+		else
+			StartRounds(rounds.queue)
+		end
+	end)
+end)
+
 SLASH_CQLSELFTEST1 = "/cqltest"
-SlashCmdList.CQLSELFTEST = Run
+SlashCmdList.CQLSELFTEST = function(message)
+	message = (message or ""):match("^%s*(.-)%s*$"):lower()
+	if message == "rounds" then
+		local queue = {}
+		for _, database in ipairs(DATABASES) do
+			if C_AddOns.DoesAddOnExist(database) then
+				queue[#queue + 1] = database
+			end
+		end
+		StartRounds(queue)
+	elseif message == "stop" then
+		local rounds = ClickableQuestLinks_SelfTestDB and ClickableQuestLinks_SelfTestDB.rounds
+		if type(rounds) == "table" and rounds.restore then
+			SetDatabaseAddOns(rounds.character, rounds.restore)
+		end
+		if ClickableQuestLinks_SelfTestDB then
+			ClickableQuestLinks_SelfTestDB.rounds = nil
+		end
+		Reload("rounds stopped, the AddOns list is back as it was.")
+	else
+		Run()
+	end
+end
