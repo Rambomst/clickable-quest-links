@@ -32,48 +32,79 @@ for d in wow-ui-source data db2; do
 	ln -sfn "$repo/tools/.cache/forever_sim/$d" "$cache/$d"
 done
 
-# The released quest databases, pinned and checked against their SHA-256 so the scenarios' expected lines match their
-# data, each unpacked into $cache/addons/<name>-<version> once (only the listed folders, when there are any).
+# The released quest databases the "real" scenarios read. By default the pinned releases below, checked against their
+# SHA-256 so the scenarios' expected lines match their data, unpacked once into $cache/addons/<name>-<version>.
+# QUESTLINKS_DATABASES=latest takes each one's newest release instead (needs gh), for the weekly drift check
+# (.github/workflows/drift.yml), into $cache/latest/<name>. Only the listed folders are kept, when there are any.
 # REAL_QUESTIEDB, REAL_DING, REAL_DONDATA and REAL_POLESTAR point the scenarios at other copies.
-fetch() { # name version url sha256 [folder...]
-	local dest="$cache/addons/$1-$2" url=$3 sum=$4
-	shift 4
-	if [[ -f "$dest/.complete" ]]; then
-		return
-	fi
-	mkdir -p "$cache/addons"
-	rm -rf "$dest"
-	curl -fsSL -o "$dest.zip" "$url"
-	echo "$sum  $dest.zip" | sha256sum -c --quiet
-	python3 - "$dest.zip" "$dest" "$@" <<-'PY'
+#
+# name, repository, pinned tag, its asset, the asset's SHA-256, the asset's name in any release, folders to keep
+databases="\
+QuestieDB Questie/QuestieDB v1.1.1 QuestieDB-1.1.1-Forever.zip \
+2527118d861e497fa40bdb6d061883bf09649d5f96e09de6885f578aefbb5e59 QuestieDB-*-Forever.zip
+Ding moust4ki/DingGuideWoWForever v1.8.1 Ding-v1.8.1-forever.zip \
+d9707c45f42dc95429129e4f476e07d37ee90d6e07e6e84256b390ef685285ea Ding-*-forever.zip
+DonData WoW-Forever-Addons/dondata v1.3.0 DonData-v1.3.0.zip \
+4409bd481f4b064bac6af488f3ae3cb57dd3a60cfdf3c04ed7f9283343a5127b DonData-*.zip
+Polestar fitzforge/polestar v0.3.7.2 Polestar-0.3.7.2.zip \
+f13ad9feae7ff75fe3de64d3fa845e69de2f779fd047f9e37795f4fcc54086f1 Polestar-[0-9]*.zip Polestar,Polestar_QuestDB"
+
+unpack() { # zip dest folders
+	python3 - "$1" "$2" "$3" <<-'PY'
 		import sys, zipfile
-		archive, dest, *keep = sys.argv[1:]
+		archive, dest, keep = sys.argv[1:]
+		keep = [folder for folder in keep.split(",") if folder]
 		with zipfile.ZipFile(archive) as z:
 		    z.extractall(dest, [m for m in z.namelist() if not keep or m.split("/")[0] in keep])
 	PY
-	rm "$dest.zip"
-	touch "$dest/.complete"
+	rm "$1"
 }
-releases=https://github.com
-[[ -n "${REAL_QUESTIEDB:-}" ]] || fetch QuestieDB 1.1.1 \
-	"$releases/Questie/QuestieDB/releases/download/v1.1.1/QuestieDB-1.1.1-Forever.zip" \
-	2527118d861e497fa40bdb6d061883bf09649d5f96e09de6885f578aefbb5e59
-[[ -n "${REAL_DING:-}" ]] || fetch Ding 1.8.1 \
-	"$releases/moust4ki/DingGuideWoWForever/releases/download/v1.8.1/Ding-v1.8.1-forever.zip" \
-	d9707c45f42dc95429129e4f476e07d37ee90d6e07e6e84256b390ef685285ea
-[[ -n "${REAL_DONDATA:-}" ]] || fetch DonData 1.3.0 \
-	"$releases/WoW-Forever-Addons/dondata/releases/download/v1.3.0/DonData-v1.3.0.zip" \
-	4409bd481f4b064bac6af488f3ae3cb57dd3a60cfdf3c04ed7f9283343a5127b
-[[ -n "${REAL_POLESTAR:-}" ]] || fetch Polestar 0.3.7.2 \
-	"$releases/fitzforge/polestar/releases/download/v0.3.7.2/Polestar-0.3.7.2.zip" \
-	f13ad9feae7ff75fe3de64d3fa845e69de2f779fd047f9e37795f4fcc54086f1 Polestar Polestar_QuestDB
+
+mode="${QUESTLINKS_DATABASES:-pinned}"
+declare -A where
+summary=""
+while read -r name repository pinned asset sum pattern keep; do
+	override="REAL_$(tr '[:lower:]' '[:upper:]' <<<"$name")"
+	if [[ -n "${!override:-}" ]]; then
+		continue
+	fi
+	if [[ "$mode" == latest ]]; then
+		dest="$cache/latest/$name"
+		rm -rf "$dest"
+		mkdir -p "$dest"
+		tag=$(gh release view --repo "$repository" --json tagName --jq .tagName)
+		gh release download "$tag" --repo "$repository" --pattern "$pattern" --dir "$dest"
+		zips=("$dest"/*.zip)
+		if [[ ${#zips[@]} -ne 1 || ! -f "${zips[0]}" ]]; then
+			echo "$name $tag: expected one asset matching $pattern, found ${#zips[@]}" >&2
+			exit 2
+		fi
+		echo "$name: newest release $tag (pinned $pinned), $(sha256sum "${zips[0]}" | cut -c1-12)"
+		summary+="| $name | $tag | $pinned |"$'\n'
+		unpack "${zips[0]}" "$dest" "${keep:-}"
+	else
+		dest="$cache/addons/$name-${pinned#v}"
+		if [[ ! -f "$dest/.complete" ]]; then
+			mkdir -p "$cache/addons"
+			rm -rf "$dest"
+			curl -fsSL -o "$dest.zip" "https://github.com/$repository/releases/download/$pinned/$asset"
+			echo "$sum  $dest.zip" | sha256sum -c --quiet
+			unpack "$dest.zip" "$dest" "${keep:-}"
+			touch "$dest/.complete"
+		fi
+	fi
+	where[$name]=$dest
+done <<<"$databases"
+if [[ -n "$summary" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+	printf '| Database | Newest release | Pinned |\n| --- | --- | --- |\n%s' "$summary" >>"$GITHUB_STEP_SUMMARY"
+fi
 
 export FOREVER_SIM="$repo/tools/forever_sim/"
 export QUESTLINKS_SIM_CACHE="$cache"
-export REAL_QUESTIEDB="${REAL_QUESTIEDB:-$cache/addons/QuestieDB-1.1.1/QuestieDB}"
-export REAL_DING="${REAL_DING:-$cache/addons/Ding-1.8.1/Ding}"
-export REAL_DONDATA="${REAL_DONDATA:-$cache/addons/DonData-1.3.0/DonData}"
-export REAL_POLESTAR="${REAL_POLESTAR:-$cache/addons/Polestar-0.3.7.2}"
+export REAL_QUESTIEDB="${REAL_QUESTIEDB:-${where[QuestieDB]}/QuestieDB}"
+export REAL_DING="${REAL_DING:-${where[Ding]}/Ding}"
+export REAL_DONDATA="${REAL_DONDATA:-${where[DonData]}/DonData}"
+export REAL_POLESTAR="${REAL_POLESTAR:-${where[Polestar]}}"
 cd "$here"
 luajit encodingutil_test.lua
 exec luajit questlinks_test.lua "$@"

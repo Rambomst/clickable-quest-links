@@ -5,6 +5,15 @@ on:
     branches: ["**"]
   pull_request:
   workflow_call:
+    inputs:
+      databases:
+        description: The quest database releases the "real" scenarios read, pinned or latest (see tests/run.sh).
+        type: string
+        default: pinned
+      filter:
+        description: Only the scenarios whose names contain this; empty runs them all.
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -50,4 +59,8 @@ jobs:
       - name: Run the tests
         env:
           FOREVER_SIM_REPO: ${{ github.workspace }}/.forever-sim
-        run: tests/run.sh
+          QUESTLINKS_DATABASES: ${{ inputs.databases || 'pinned' }}
+          FILTER: ${{ inputs.filter }}
+          # For gh, which finds the newest releases when the databases are "latest".
+          GH_TOKEN: ${{ github.token }}
+        run: tests/run.sh ${FILTER:+"$FILTER"}

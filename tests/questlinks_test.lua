@@ -10,6 +10,8 @@ local ADDON = "ClickableQuestLinks"
 -- the installed one.
 local ADDON_DIR = os.getenv("QUESTLINKS_ADDON_DIR") or (here .. "..")
 local FAKE_DB_DIR = here .. "fixtures/QuestieDB"
+-- The development-only addon behind /cqltest, which runs these quests in the real client.
+local SELFTEST_DIR = here .. "ingame/ClickableQuestLinks_SelfTest"
 -- The other quest databases the addon reads, as stand-ins with their APIs' shapes.
 local FAKE_SOURCES = { ding = "fixtures/Ding", polestar = "fixtures/Polestar", donData = "fixtures/DonData" }
 -- The UiMap names the fixtures' and the real databases' spawns need, as the pinned Forever build names those maps.
@@ -53,11 +55,17 @@ local RAPTOR = "|cffffff00|Hquest:194:34|h[Raptor Mastery]|h|r"
 -- plain yellow), opts.level (the player's level; the sim's is 60), opts.ding, opts.polestar and opts.donData (load
 -- that database's stand-in), opts.polestarUnloaded (Polestar's reads fail, as before its data loads),
 -- opts.realQuestieDB (the released QuestieDB instead of the fake one), opts.realDing, opts.realDonData and
--- opts.realPolestar (that released addon).
+-- opts.realPolestar (that released addon), opts.selfTest (the /cqltest addon, after this one).
 local function boot(opts)
 	opts = opts or {}
 	local sim = Sim.new({ cache = CACHE })
 	EncodingUtil.install(sim)
+	-- Under its folder's name, as the client names an addon. The sim takes the first TOC's name, which for QuestieDB
+	-- and DonData is Forever's flavour file (QuestieDB_Camelot.toc), and C_AddOns.IsAddOnLoaded("QuestieDB") then
+	-- says false.
+	local function realAddon(dir)
+		sim:addon(dir, dir:match("([^/]+)/*$"))
+	end
 	-- Sim gap: its SetOwner drops a tooltip's points even for ANCHOR_PRESERVE, which in the client keeps them (and
 	-- Blizzard's ItemRefSetHyperlink then does arithmetic on the unplaced title's GetRight).
 	local tooltipMethods = sim.widgets.methods.GameTooltip
@@ -76,7 +84,7 @@ local function boot(opts)
 		sim.G.FAKE_QUESTIEDB_CONTRACT = opts.contract
 	end
 	if opts.realQuestieDB then
-		sim:addon(REAL_QUESTIEDB)
+		realAddon(REAL_QUESTIEDB)
 		sim.impl["C_Map.GetAreaInfo"] = function(areaID)
 			return AREA_NAMES[areaID]
 		end
@@ -89,14 +97,14 @@ local function boot(opts)
 		end
 	end
 	if opts.realDing then
-		sim:addon(REAL_DING)
+		realAddon(REAL_DING)
 	end
 	if opts.realDonData then
-		sim:addon(REAL_DONDATA)
+		realAddon(REAL_DONDATA)
 	end
 	if opts.realPolestar then
-		sim:addon(REAL_POLESTAR .. "/Polestar")
-		sim:addon(REAL_POLESTAR .. "/Polestar_QuestDB")
+		realAddon(REAL_POLESTAR .. "/Polestar")
+		realAddon(REAL_POLESTAR .. "/Polestar_QuestDB")
 	end
 	if opts.polestarUnloaded then
 		sim.G.FAKE_POLESTAR_UNLOADED = true
@@ -113,6 +121,9 @@ local function boot(opts)
 	end
 	if opts.addon ~= false then
 		sim:addon(ADDON_DIR)
+	end
+	if opts.selfTest then
+		sim:addon(SELFTEST_DIR)
 	end
 	sim.loadRequests = {}
 	sim.impl["C_QuestLog.RequestLoadQuestByID"] = function(questID)
@@ -666,6 +677,27 @@ scenario("the real DonData: the sender's name on the link, and its NPCs once the
 	lines = tooltipLines(G)
 	expectLines(lines, { "Level:|r 28 (requires 22)", "Ends:|r Clerk Daltry (Duskwood)" })
 	assert(not hasLine(lines, "Starts:"), "DonData has no starter for a quest an object starts")
+	sim:expectNoErrors(ADDON)
+end)
+
+scenario("the in-game self-test passes on the headless client with the real QuestieDB", function()
+	local sim, G = boot({ realQuestieDB = true, selfTest = true })
+	serveQuests(sim, {})
+	G.SlashCmdList.CQLSELFTEST("")
+	sim:advance(2.5)
+	local db = G.ClickableQuestLinks_SelfTestDB
+	local run = db and db.runs and db.runs[1]
+	assert(run, "no run recorded; printed:\n" .. table.concat(sim.printed, "\n"))
+	local failed = {}
+	for _, check in ipairs(run.checks) do
+		if not check.ok then
+			failed[#failed + 1] = check.name .. ": " .. tostring(check.detail)
+		end
+	end
+	eq(table.concat(failed, "\n"), "", "failed checks")
+	eq(run.skipped, nil, "lines left unchecked")
+	-- 5 conversions and the text left alone, 5 tooltips with 3 lines each, no errors.
+	eq(run.total, 27, "checks run")
 	sim:expectNoErrors(ADDON)
 end)
 

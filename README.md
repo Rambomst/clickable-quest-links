@@ -75,6 +75,15 @@ at other copies. QuestieDB keeps its data base64, zlib and CBOR encoded in TOC m
 `C_EncodingUtil`, which forever_sim generates from Blizzard's documentation without implementing, so
 `tests/encodingutil.lua` implements it for the sim (`tests/encodingutil_test.lua` checks it).
 
+Every Monday, `.github/workflows/drift.yml` runs the "real" scenarios against the newest release of each database
+instead of the pinned one, so a change in one of them fails there first; the run's summary lists the releases it
+tested. Locally, with gh: `QUESTLINKS_DATABASES=latest tests/run.sh "the real "`.
+
+`tests/ingame/ClickableQuestLinks_SelfTest` is a development-only addon (packages leave `tests/` out). Installed next
+to the addon, `/cqltest` sends the same quests through the client's own chat filters and quest tooltip, prints a
+summary and keeps the run in its saved variables. That covers what only the real client has: its zone names, its
+quest data and Blizzard's tooltip as it runs there. One scenario runs it on the headless client as well.
+
 The two chat screenshots in `docs/screenshots` are drawn from the addon's own output: `tools/scene.lua` runs its chat
 filter on forever_sim, and `tools/screenshots.py` draws the result with
 [forever-core](https://github.com/cjber/forever-core)'s wowmock, in the client's chat font and class colours. They

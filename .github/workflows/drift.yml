@@ -1,0 +1,20 @@
+name: Drift
+
+# Every Monday, the "real" scenarios against the newest release of each quest database instead of the pinned ones, so
+# a change in one of them shows up here, as a failed run, before players run into it. The run's summary lists the
+# releases it tested next to the pinned ones (tests/run.sh), which normal CI keeps using.
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  newest-databases:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      databases: latest
+      filter: "the real "

@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Clickable Quest Links Self-Test
+## Notes: For development: /cqltest checks Clickable Quest Links against the quest databases installed here.
+## Author: rambomst
+## Version: dev
+## Dependencies: ClickableQuestLinks
+## OptionalDeps: QuestieDB, Ding, Polestar, DonData
+## SavedVariables: ClickableQuestLinks_SelfTestDB
+
+SelfTest.lua
