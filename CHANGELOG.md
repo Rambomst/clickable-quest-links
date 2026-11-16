@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.3
+
+- Now also on [Wago Addons](https://addons.wago.io/addons/clickable-quest-links). Nothing changes in game.
+
 ## v1.1.2
 
 - A link whose text has no level, like `[Raptor Mastery (194)]`, takes the quest's level from the game once the game
