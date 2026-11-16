@@ -60,6 +60,11 @@ Report bugs and ideas as an [issue](https://github.com/Rambomst/clickable-quest-
 translated for every client language at the top of `ClickableQuestLinks.lua`; corrections from native speakers are
 welcome as an issue or a pull request.
 
+## Support
+
+If Clickable Quest Links is useful to you and you'd like to say thanks, you can
+[buy me a coffee on Ko-fi](https://ko-fi.com/ram01). It's free either way.
+
 ## Development
 
 Everything the addon runs is in `ClickableQuestLinks.lua`:

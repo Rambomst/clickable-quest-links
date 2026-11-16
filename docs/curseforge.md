@@ -32,6 +32,11 @@ without a quest level. It reads the one you already run.
 
 Bugs, ideas and translation fixes: https://github.com/Rambomst/clickable-quest-links/issues
 
+## Donation
+
+General tab, Donation Method: Ko-fi, username `ram01` (set 2026-11-16). CurseForge shows it as a Donate link on the
+project page, so the description has no Ko-fi line of its own.
+
 ## Screenshots
 
 Under Media, in this order, with these titles and descriptions, all four marked Feature Media (uploaded 2026-11-15).
